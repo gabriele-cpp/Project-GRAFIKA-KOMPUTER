@@ -3,36 +3,33 @@ export class Mesh {
         this.gl = gl;
 
         const vertices = new Float32Array([
-            // Depan, Belakang, Atas, Bawah, Kanan, Kiri (Sama seperti sebelumnya)
-            -1.0, -1.0,  1.0,   1.0, -1.0,  1.0,   1.0,  1.0,  1.0,  -1.0,  1.0,  1.0,
-            -1.0, -1.0, -1.0,  -1.0,  1.0, -1.0,   1.0,  1.0, -1.0,   1.0, -1.0, -1.0,
-            -1.0,  1.0, -1.0,  -1.0,  1.0,  1.0,   1.0,  1.0,  1.0,   1.0,  1.0, -1.0,
-            -1.0, -1.0, -1.0,   1.0, -1.0, -1.0,   1.0, -1.0,  1.0,  -1.0, -1.0,  1.0,
-            1.0, -1.0, -1.0,   1.0,  1.0, -1.0,   1.0,  1.0,  1.0,   1.0, -1.0,  1.0,
-            -1.0, -1.0, -1.0,  -1.0, -1.0,  1.0,  -1.0,  1.0,  1.0,  -1.0,  1.0, -1.0,
+            -1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1,
+            -1,-1,-1, -1, 1,-1,  1, 1,-1,  1,-1,-1,
+            -1, 1,-1, -1, 1, 1,  1, 1, 1,  1, 1,-1,
+            -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1,
+             1,-1,-1,  1, 1,-1,  1, 1, 1,  1,-1, 1,
+            -1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1,
         ]);
 
-        // Arah permukaan setiap sisi kubus (Untuk pantulan cahaya)
         const normals = new Float32Array([
-            0, 0, 1,   0, 0, 1,   0, 0, 1,   0, 0, 1, // Depan menghadap Z+
-            0, 0,-1,   0, 0,-1,   0, 0,-1,   0, 0,-1, // Belakang menghadap Z-
-            0, 1, 0,   0, 1, 0,   0, 1, 0,   0, 1, 0, // Atas menghadap Y+
-            0,-1, 0,   0,-1, 0,   0,-1, 0,   0,-1, 0, // Bawah menghadap Y-
-            1, 0, 0,   1, 0, 0,   1, 0, 0,   1, 0, 0, // Kanan menghadap X+
-            -1, 0, 0,  -1, 0, 0,  -1, 0, 0,  -1, 0, 0, // Kiri menghadap X-
+             0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,
+             0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,
+             0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0,
+             0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0,
+             1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0,
+            -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
         ]);
 
         const indices = new Uint16Array([
-            0,  1,  2,      0,  2,  3,    4,  5,  6,      4,  6,  7,
-            8,  9,  10,     8,  10, 11,   12, 13, 14,     12, 14, 15,
-            16, 17, 18,     16, 18, 19,   20, 21, 22,     20, 22, 23
+             0, 1, 2,  0, 2, 3,   4, 5, 6,  4, 6, 7,
+             8, 9,10,  8,10,11,  12,13,14, 12,14,15,
+            16,17,18, 16,18,19,  20,21,22, 20,22,23
         ]);
 
         this.vertexBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
-        // Buffer baru untuk cahaya
         this.normalBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
@@ -46,17 +43,15 @@ export class Mesh {
 
     draw(shaderProgram) {
         const gl = this.gl;
-
-        const positionLocation = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        const posLoc = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-        gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(posLoc);
 
-        // Kasih tahu GPU tempat nyari data pantulan cahaya
-        const normalLocation = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+        const normLoc = gl.getAttribLocation(shaderProgram, 'aVertexNormal');
         gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
-        gl.vertexAttribPointer(normalLocation, 3, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(normalLocation);
+        gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(normLoc);
 
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
         gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);

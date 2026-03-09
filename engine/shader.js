@@ -1,6 +1,6 @@
 export class Shader {
     constructor(gl, vertexSource, fragmentSource) {
-        this.gl = gl;
+        this.gl      = gl;
         this.program = this.createProgram(vertexSource, fragmentSource);
     }
 
@@ -8,9 +8,8 @@ export class Shader {
         const shader = this.gl.createShader(type);
         this.gl.shaderSource(shader, source);
         this.gl.compileShader(shader);
-
         if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
-            console.error('Error compile shader:', this.gl.getShaderInfoLog(shader));
+            console.error('Shader compile error:', this.gl.getShaderInfoLog(shader));
             this.gl.deleteShader(shader);
             return null;
         }
@@ -18,22 +17,18 @@ export class Shader {
     }
 
     createProgram(vertexSource, fragmentSource) {
-        const vertexShader = this.compileShader(this.gl.VERTEX_SHADER, vertexSource);
-        const fragmentShader = this.compileShader(this.gl.FRAGMENT_SHADER, fragmentSource);
-
-        const program = this.gl.createProgram();
-        this.gl.attachShader(program, vertexShader);
-        this.gl.attachShader(program, fragmentShader);
-        this.gl.linkProgram(program);
-
-        if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
-            console.error('Error link program:', this.gl.getProgramInfoLog(program));
+        const vs  = this.compileShader(this.gl.VERTEX_SHADER,   vertexSource);
+        const fs  = this.compileShader(this.gl.FRAGMENT_SHADER, fragmentSource);
+        const prg = this.gl.createProgram();
+        this.gl.attachShader(prg, vs);
+        this.gl.attachShader(prg, fs);
+        this.gl.linkProgram(prg);
+        if (!this.gl.getProgramParameter(prg, this.gl.LINK_STATUS)) {
+            console.error('Program link error:', this.gl.getProgramInfoLog(prg));
             return null;
         }
-        return program;
+        return prg;
     }
 
-    use() {
-        this.gl.useProgram(this.program);
-    }
+    use() { this.gl.useProgram(this.program); }
 }

@@ -1,34 +1,190 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Engine & Culling Simulator</title>
+    <title>Hybrid Spatial-Occlusion Culling</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
 <canvas id="gameCanvas"></canvas>
 
-<div id="fpsCounter" style="position: absolute; top: 10px; left: 10px; color: #00ff00; font-family: monospace; font-size: 20px; background: rgba(0,0,0,0.7); padding: 8px 15px; border-radius: 5px; pointer-events: none; z-index: 10;">
-    FPS: 0
+<!-- Scanline HUD overlay -->
+<div id="hud-overlay"></div>
+
+<!-- FPS COUNTER (top-left)-->
+<div id="fps-panel">
+    <div class="fps-value" id="stat-fps">0</div>
+    <div class="fps-label">FPS</div>
 </div>
 
-<div style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 15px; border-radius: 8px; font-family: sans-serif; z-index: 10;">
-    <h3 style="margin-top: 0; border-bottom: 1px solid #555; padding-bottom: 5px;">Optimasi Engine</h3>
-
-    <label style="cursor: pointer; display: block; margin-bottom: 10px;">
-        <input type="checkbox" id="toggleFrustum" checked> Frustum Culling
-    </label>
-
-    <label style="color: #888; display: block; margin-bottom: 10px;">
-        <input type="checkbox" id="toggleLOD" disabled> Level of Detail (LOD)
-    </label>
-
-    <label style="color: #888; display: block;">
-        <input type="checkbox" id="toggleOcclusion" disabled> Occlusion Culling
-    </label>
+<!-- STATS BAR (top-center) -->
+<div id="stats-panel">
+    <div class="stat-block">
+        <span class="val" id="stat-rendered">0</span>
+        <span class="lbl">Rendered</span>
+    </div>
+    <div class="stat-block">
+        <span class="val" id="stat-total">0</span>
+        <span class="lbl">Total</span>
+    </div>
+    <div class="stat-block">
+        <span class="val" id="stat-culled" style="color: var(--yellow)">0</span>
+        <span class="lbl">Culled</span>
+    </div>
+    <div class="stat-block">
+        <span class="val" id="stat-eff" style="color: var(--green)">0%</span>
+        <span class="lbl">Efficiency</span>
+    </div>
 </div>
 
+<!-- CONTROL PANEL (right side)-->
+<div id="control-panel">
+    <div class="panel-header">Control Panel</div>
+
+    <!-- Culling Methods -->
+    <div class="panel-section">
+        <div class="section-title">Culling Methods</div>
+
+        <label class="toggle-row">
+            <span class="toggle-label">
+                <span>Frustum Culling</span>
+                <span class="tag-base">BASE</span>
+            </span>
+            <div class="toggle-switch">
+                <input type="checkbox" id="toggleFrustum" checked>
+                <span class="slider-track"></span>
+            </div>
+        </label>
+
+        <label class="toggle-row">
+            <span class="toggle-label">
+                <span>Octree Spatial</span>
+                <span class="tag-new">NEW</span>
+            </span>
+            <div class="toggle-switch">
+                <input type="checkbox" id="toggleOctree" checked>
+                <span class="slider-track"></span>
+            </div>
+        </label>
+
+        <label class="toggle-row">
+            <span class="toggle-label">
+                <span>Occlusion Culling</span>
+                <span class="tag-new">NEW</span>
+            </span>
+            <div class="toggle-switch">
+                <input type="checkbox" id="toggleOcclusion">
+                <span class="slider-track"></span>
+            </div>
+        </label>
+
+        <label class="toggle-row">
+            <span class="toggle-label">
+                <span>Level of Detail</span>
+                <span class="tag-new">NEW</span>
+            </span>
+            <div class="toggle-switch">
+                <input type="checkbox" id="toggleLOD">
+                <span class="slider-track"></span>
+            </div>
+        </label>
+    </div>
+
+    <!-- Debug Visualization -->
+    <div class="panel-section">
+        <div class="section-title">Debug Visualization</div>
+
+        <label class="toggle-row">
+            <span class="toggle-label">Bounding Box</span>
+            <div class="toggle-switch">
+                <input type="checkbox" id="toggleBBox">
+                <span class="slider-track"></span>
+            </div>
+        </label>
+
+        <label class="toggle-row">
+            <span class="toggle-label">LOD Color Mode</span>
+            <div class="toggle-switch">
+                <input type="checkbox" id="toggleLODColor">
+                <span class="slider-track"></span>
+            </div>
+        </label>
+    </div>
+
+    <!-- Scene Generation -->
+    <div class="panel-section">
+        <div class="section-title">Scene Generation</div>
+
+        <div class="slider-row">
+            <label>
+                Object Count
+                <span id="obj-count-display">5,000 objects</span>
+            </label>
+            <input type="range" id="obj-slider"
+                   min="500" max="50000" step="500" value="5000">
+        </div>
+
+        <select id="sel-mode">
+            <option value="random">Random Distribution</option>
+            <option value="clustered">Clustered Distribution</option>
+        </select>
+
+        <select id="sel-palette">
+            <option value="0">Palette: Cyber/Neon</option>
+            <option value="1">Palette: Warm</option>
+            <option value="2">Palette: Cool</option>
+        </select>
+
+        <button class="btn btn-primary" id="btn-generate">⟳ Generate Scene</button>
+    </div>
+
+    <!-- Upload Model -->
+    <div class="panel-section">
+        <div class="section-title">Custom Model</div>
+        <button class="btn" id="btn-upload">↑ Upload GLTF / OBJ</button>
+        <input type="file" id="file-input" accept=".gltf,.glb,.obj">
+    </div>
+
+    <!-- Performance Dashboard -->
+    <div class="panel-section">
+        <div class="section-title">Performance Analysis</div>
+        <button class="btn btn-perf" id="btn-perf">📊 Performance Dashboard</button>
+    </div>
+</div>
+
+<!-- CULLING BREAKDOWN (bottom-left)-->
+<div id="cull-breakdown">
+    <div class="cull-title">Culling Breakdown</div>
+
+    <div class="cull-row">
+        <span><span class="cull-dot" style="background:#00c8ff"></span>Frustum + Octree</span>
+        <span class="cull-val" id="stat-cF">0</span>
+    </div>
+    <div class="cull-row">
+        <span><span class="cull-dot" style="background:#7b2fff"></span>Occlusion</span>
+        <span class="cull-val" id="stat-cO">0</span>
+    </div>
+    <div class="cull-row">
+        <span><span class="cull-dot" style="background:#ffe033"></span>LOD (distance)</span>
+        <span class="cull-val" id="stat-cL">0</span>
+    </div>
+</div>
+
+<!-- CONTROLS HINT (bottom-right) -->
+<div id="controls-hint">
+    <span class="hint-key">W A S D</span> Move &nbsp;
+    <span class="hint-key">Q / E</span> Up/Down<br>
+    <span class="hint-key">←→↑↓</span> Look &nbsp;
+    <span class="hint-key">Mouse</span> Click+Drag to look
+</div>
+
+<!-- Toast notification -->
+<div id="toast"></div>
+
+<!-- Chart.js untuk Performance Dashboard -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module" src="main.js"></script>
 </body>
 </html>
