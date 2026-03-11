@@ -228,6 +228,12 @@ export class ChartPanel {
         if (this.visible) this._refreshAll();
     }
 
+    close() {
+        this.visible = false;
+        const el = document.getElementById('perf-overlay');
+        if (el) el.style.display = 'none';
+    }
+
     // Dipanggil dari main.js setiap update stats (500ms)
     update(perfMonitor, activeState) {
         if (!this._injected) return;
@@ -375,7 +381,7 @@ export class ChartPanel {
     }
 
     _bindButtons() {
-        document.getElementById('perf-close')?.addEventListener('click', () => this.toggle());
+        document.getElementById('perf-close')?.addEventListener('click', () => this.close());
         document.getElementById('perf-clear')?.addEventListener('click', () => {
             this._csvRows = [];
             Object.values(this.charts).forEach(ch => {

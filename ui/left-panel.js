@@ -529,6 +529,7 @@ input[type=range]::-webkit-slider-thumb {
 }
 `;
 
+
 // Object type definitions with emoji icons
 const OBJ_TYPES = [
     { id: 'cube',     label: 'Cube',     icon: '⬛' },
