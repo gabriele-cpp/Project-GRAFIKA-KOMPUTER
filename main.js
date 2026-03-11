@@ -279,8 +279,10 @@ const turnSpeed = 0.03;
 let mouseDown = false;
 let lastMouseX = 0, lastMouseY = 0;
 document.addEventListener('mousedown', e => {
-    // Jangan trigger camera movement saat klik di UI panel
-    if (e.target.closest('#left-panel') || e.target.closest('#left-panel-toggle')) return;
+    // Jangan trigger camera drag saat klik di UI panels
+    if (e.target.closest('#left-panel'))       return;
+    if (e.target.closest('#left-panel-toggle')) return;
+    if (e.target.closest('#perf-overlay'))      return;
     mouseDown = true;
     lastMouseX = e.clientX; lastMouseY = e.clientY;
     renderer.canvas.requestPointerLock();

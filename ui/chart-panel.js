@@ -72,7 +72,7 @@ function makeDataset(label, color, data = []) {
 // ============================================================
 function buildPanelHTML() {
     return `
-<div id="perf-overlay" style="display:none">
+<div id="perf-overlay">
   <div id="perf-panel">
 
     <!-- Header -->
@@ -222,16 +222,17 @@ export class ChartPanel {
 
     toggle() {
         if (!this._injected) this.init();
+        const el = document.getElementById('perf-overlay');
+        if (!el) return;
         this.visible = !this.visible;
-        document.getElementById('perf-overlay').style.display =
-            this.visible ? 'flex' : 'none';
+        el.classList.toggle('perf-visible', this.visible);
         if (this.visible) this._refreshAll();
     }
 
     close() {
         this.visible = false;
         const el = document.getElementById('perf-overlay');
-        if (el) el.style.display = 'none';
+        if (el) el.classList.remove('perf-visible');
     }
 
     // Dipanggil dari main.js setiap update stats (500ms)
@@ -458,8 +459,12 @@ export class ChartPanel {
     z-index: 200;
     background: rgba(2,3,12,0.88);
     backdrop-filter: blur(6px);
+    display: none;
     align-items: center; justify-content: center;
     padding: 16px;
+}
+#perf-overlay.perf-visible {
+    display: flex;
 }
 
 #perf-panel {

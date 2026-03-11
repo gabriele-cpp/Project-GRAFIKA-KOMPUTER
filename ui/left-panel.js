@@ -1,3 +1,19 @@
+// ============================================================
+// ui/left-panel.js  [BARU — Fitur 1,2,3,4,5,6]
+//
+// Left Sidebar Panel yang dapat dibuka/tutup (slide dari kiri).
+// Panel ini menangani:
+//   - Fitur 1 : Slide panel kiri dengan toggle button
+//   - Fitur 2 : Object Type Selector (7 bentuk)
+//   - Fitur 3 : Custom Model upload + scale/rotation/delete
+//   - Fitur 4 : Performance Dashboard real-time
+//   - Fitur 5 : Export performance data ke JSON
+//   - Fitur 6 : Toggle panel agar tidak menghalangi layar
+//
+// Panel TIDAK mengubah main.js / pipeline rendering.
+// Ia berkomunikasi via callback yang didaftarkan dari main.js.
+// ============================================================
+
 const PANEL_HTML = `
 <div id="left-panel-toggle" title="Toggle Feature Panel">
   <span id="toggle-icon">◀</span>
@@ -200,7 +216,9 @@ const PANEL_HTML = `
 </aside>
 `;
 
+// ────────────────────────────────────────────────────────────
 // STYLES  (injected once into <head>)
+// ────────────────────────────────────────────────────────────
 const PANEL_CSS = `
 :root {
   --lp-w: 270px;
@@ -529,8 +547,9 @@ input[type=range]::-webkit-slider-thumb {
 }
 `;
 
-
+// ────────────────────────────────────────────────────────────
 // Object type definitions with emoji icons
+// ────────────────────────────────────────────────────────────
 const OBJ_TYPES = [
     { id: 'cube',     label: 'Cube',     icon: '⬛' },
     { id: 'sphere',   label: 'Sphere',   icon: '⚪' },
@@ -542,7 +561,9 @@ const OBJ_TYPES = [
     { id: 'none',     label: 'None',     icon: '○'  },
 ];
 
+// ────────────────────────────────────────────────────────────
 // LeftPanel class
+// ────────────────────────────────────────────────────────────
 export class LeftPanel {
     constructor() {
         this.isOpen       = false;
@@ -617,7 +638,10 @@ export class LeftPanel {
         if (numIn)  numIn.value  = count;
     }
 
+    // ────────────────────────────────────────────────────────
     // PRIVATE: build / bind
+    // ────────────────────────────────────────────────────────
+
     _buildObjGrid() {
         const grid = document.getElementById('obj-type-grid');
         if (!grid) return;
