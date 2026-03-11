@@ -41,7 +41,6 @@ export const mat4 = {
     }
 };
 
-
 // vec3 utilities — digunakan oleh Octree & occlusion
 export const vec3 = {
     distance: (a, b) => Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]),

@@ -3,8 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hybrid Spatial-Occlusion Culling</title>
+    <title>3D Simulator — Hybrid Spatial-Occlusion Culling</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Import map: resolve bare 'three' specifier untuk GLTFLoader/OBJLoader internal imports -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
 </head>
 <body>
 
@@ -13,8 +22,8 @@
 <!-- Scanline HUD overlay -->
 <div id="hud-overlay"></div>
 
-<!-- FPS COUNTER (top-left)-->
-<div id="fps-panel">
+<!-- FPS COUNTER (top-left, offset for panel toggle) -->
+<div id="fps-panel" style="left: 36px;">
     <div class="fps-value" id="stat-fps">0</div>
     <div class="fps-label">FPS</div>
 </div>
@@ -39,122 +48,28 @@
     </div>
 </div>
 
-<!-- CONTROL PANEL (right side)-->
-<div id="control-panel">
-    <div class="panel-header">Control Panel</div>
-
-    <!-- Culling Methods -->
-    <div class="panel-section">
-        <div class="section-title">Culling Methods</div>
-
-        <label class="toggle-row">
-            <span class="toggle-label">
-                <span>Frustum Culling</span>
-                <span class="tag-base">BASE</span>
-            </span>
-            <div class="toggle-switch">
-                <input type="checkbox" id="toggleFrustum" checked>
-                <span class="slider-track"></span>
-            </div>
-        </label>
-
-        <label class="toggle-row">
-            <span class="toggle-label">
-                <span>Octree Spatial</span>
-                <span class="tag-new">NEW</span>
-            </span>
-            <div class="toggle-switch">
-                <input type="checkbox" id="toggleOctree" checked>
-                <span class="slider-track"></span>
-            </div>
-        </label>
-
-        <label class="toggle-row">
-            <span class="toggle-label">
-                <span>Occlusion Culling</span>
-                <span class="tag-new">NEW</span>
-            </span>
-            <div class="toggle-switch">
-                <input type="checkbox" id="toggleOcclusion">
-                <span class="slider-track"></span>
-            </div>
-        </label>
-
-        <label class="toggle-row">
-            <span class="toggle-label">
-                <span>Level of Detail</span>
-                <span class="tag-new">NEW</span>
-            </span>
-            <div class="toggle-switch">
-                <input type="checkbox" id="toggleLOD">
-                <span class="slider-track"></span>
-            </div>
-        </label>
-    </div>
-
-    <!-- Debug Visualization -->
-    <div class="panel-section">
-        <div class="section-title">Debug Visualization</div>
-
-        <label class="toggle-row">
-            <span class="toggle-label">Bounding Box</span>
-            <div class="toggle-switch">
-                <input type="checkbox" id="toggleBBox">
-                <span class="slider-track"></span>
-            </div>
-        </label>
-
-        <label class="toggle-row">
-            <span class="toggle-label">LOD Color Mode</span>
-            <div class="toggle-switch">
-                <input type="checkbox" id="toggleLODColor">
-                <span class="slider-track"></span>
-            </div>
-        </label>
-    </div>
-
-    <!-- Scene Generation -->
-    <div class="panel-section">
-        <div class="section-title">Scene Generation</div>
-
-        <div class="slider-row">
-            <label>
-                Object Count
-                <span id="obj-count-display">5,000 objects</span>
-            </label>
-            <input type="range" id="obj-slider"
-                   min="500" max="50000" step="500" value="5000">
-        </div>
-
-        <select id="sel-mode">
-            <option value="random">Random Distribution</option>
-            <option value="clustered">Clustered Distribution</option>
-        </select>
-
-        <select id="sel-palette">
-            <option value="0">Palette: Cyber/Neon</option>
-            <option value="1">Palette: Warm</option>
-            <option value="2">Palette: Cool</option>
-        </select>
-
-        <button class="btn btn-primary" id="btn-generate">⟳ Generate Scene</button>
-    </div>
-
-    <!-- Upload Model -->
-    <div class="panel-section">
-        <div class="section-title">Custom Model</div>
-        <button class="btn" id="btn-upload">↑ Upload GLTF / OBJ</button>
-        <input type="file" id="file-input" accept=".gltf,.glb,.obj">
-    </div>
-
-    <!-- Performance Dashboard -->
-    <div class="panel-section">
-        <div class="section-title">Performance Analysis</div>
-        <button class="btn btn-perf" id="btn-perf">📊 Performance Dashboard</button>
-    </div>
+<!-- Right control panel dihapus — semua kontrol dipindah ke Left Panel -->
+<!-- Hidden fallback elements agar referensi ID di main.js tidak error -->
+<div style="display:none">
+  <input type="checkbox" id="toggleFrustum" checked>
+  <input type="checkbox" id="toggleOctree" checked>
+  <input type="checkbox" id="toggleOcclusion">
+  <input type="checkbox" id="toggleLOD">
+  <input type="checkbox" id="toggleBBox">
+  <input type="checkbox" id="toggleLODColor">
+  <input type="range"    id="obj-slider" min="1" max="50000" step="1" value="500">
+  <span id="obj-count-display"></span>
+  <select id="sel-mode"><option value="random">Random</option><option value="clustered">Clustered</option></select>
+  <select id="sel-palette"><option value="0">0</option><option value="1">1</option><option value="2">2</option></select>
+  <button id="btn-generate"></button>
+  <button id="btn-upload"></button>
+  <input type="file" id="file-input" accept=".gltf,.glb,.obj">
+  <button id="btn-perf"></button>
 </div>
 
-<!-- CULLING BREAKDOWN (bottom-left)-->
+
+
+<!-- CULLING BREAKDOWN (bottom-left — offset for left panel toggle) -->
 <div id="cull-breakdown">
     <div class="cull-title">Culling Breakdown</div>
 

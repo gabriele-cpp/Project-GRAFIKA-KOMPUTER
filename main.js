@@ -12,7 +12,9 @@ import { OcclusionCuller }  from './culling/occlusion.js';   // [BARU]
 import { generateObjects, generateClustered } from './objects/objects.js'; // [BARU]
 import { PerformanceMonitor }               from './engine/performance.js'; // [BARU]
 import { ChartPanel }                       from './ui/chart-panel.js';     // [BARU]
-
+import { LeftPanel }                        from './ui/left-panel.js';      // [BARU — Fitur 1-6]
+import { createGeometry, GeometryMesh, GEOMETRY_TYPES }  from './engine/geometry.js';    // [BARU — Fitur 2]
+import { ModelLoader }                     from './engine/model-loader.js'; // [BARU — Three.js loader]
 
 // SHADER 
 const vertexShaderCode = `
@@ -106,7 +108,7 @@ const gl       = renderer.gl;
 
 const shader   = new Shader(gl, vertexShaderCode,  fragmentShaderCode);
 const bbShader = new Shader(gl, bbVertexCode,       bbFragmentCode);
-const cube     = new Mesh(gl);
+// cube removed — replaced by activeMesh (see geometry system below)
 const bbox     = createBBoxMesh(gl);
 
 const aspect   = renderer.canvas.width / renderer.canvas.height;
@@ -114,20 +116,20 @@ const camera   = new Camera(Math.PI / 4, aspect, 0.1, 2000.0);
 
 // Culling systems
 const frustum  = new Frustum();
-const octree   = new Octree(600, 5, 20);   
-const lod      = new LOD();                
-const occlusion = new OcclusionCuller();    
+const octree   = new Octree(600, 5, 20);   // [BARU] world size 600, max depth 5
+const lod      = new LOD();                 // [BARU]
+const occlusion = new OcclusionCuller();    // [BARU]
 
-// Uniform locations (asli)
+// Uniform locations 
 const viewLoc       = gl.getUniformLocation(shader.program, 'uViewMatrix');
 const projLoc       = gl.getUniformLocation(shader.program, 'uProjectionMatrix');
 const offsetLoc     = gl.getUniformLocation(shader.program, 'uOffset');
-const scaleLoc      = gl.getUniformLocation(shader.program, 'uScale');        
+const scaleLoc      = gl.getUniformLocation(shader.program, 'uScale');         // [BARU]
 const lightDirLoc   = gl.getUniformLocation(shader.program, 'uLightDirection');
 const baseColorLoc  = gl.getUniformLocation(shader.program, 'uBaseColor');
-const lodLevelLoc   = gl.getUniformLocation(shader.program, 'uLodLevel');      
+const lodLevelLoc   = gl.getUniformLocation(shader.program, 'uLodLevel');      // [BARU]
 
-// BBox uniform locations [BARU]
+// BBox uniform locations 
 const bbViewLoc    = gl.getUniformLocation(bbShader.program, 'uViewMatrix');
 const bbProjLoc    = gl.getUniformLocation(bbShader.program, 'uProjectionMatrix');
 const bbOffsetLoc  = gl.getUniformLocation(bbShader.program, 'uOffset');
@@ -139,23 +141,111 @@ const lightDirection = [0.8, 1.0, 0.5];
 // PERFORMANCE MONITOR + CHART PANEL 
 const perfMonitor = new PerformanceMonitor(gl);
 const chartPanel  = new ChartPanel();
+const leftPanel   = new LeftPanel();   
+
+// GEOMETRY SYSTEM 
+// activeMesh adalah referensi ke mesh yang sedang dipakai render.
+// Mengganti activeMesh tidak mengubah pipeline — hanya pointer.
+let activeMesh = new Mesh(gl); 
+let currentGeoType = 'cube';
+
+function setGeometryType(type) {
+    currentGeoType = type;
+    if (type === 'none') {
+        activeMesh = null;  // null = skip draw call (scene kosong)
+    } else if (type === 'cube') {
+        activeMesh = new Mesh(gl); // pakai Mesh asli untuk cube
+    } else {
+        activeMesh = createGeometry(gl, type);
+    }
+}
+
+// THREE.JS MODEL LOADER [BARU]
+const modelLoader = new ModelLoader();
+
+modelLoader.onLoad = (filename) => {
+    // Ekstrak geometry dari Three.js model → inject ke WebGL pipeline
+    // Ini memungkinkan model dirender sebagai activeMesh (bisa 1–50000 instances)
+    setTimeout(() => {
+        const geo = modelLoader.extractGeometry();
+        if (geo && geo.indices.length > 0) {
+            activeMesh    = new GeometryMesh(gl, geo.vertices, geo.normals, geo.indices);
+            currentGeoType = 'custom';
+            showToast(`"${filename}" siap — ${state.objectCount} instances di scene!`);
+        } else {
+            showToast(`Model "${filename}" ditampilkan (Three.js overlay). Geometry extraction gagal.`);
+        }
+    }, 300); // delay kecil agar Three.js selesai setup matrixWorld
+};
+modelLoader.onError = (msg) => {
+    showToast(`Error: ${msg}`);
+};
+modelLoader.onProgress = (pct) => {
+    if (pct < 100) showToast(`Loading model... ${pct}%`);
+};
+
+// CUSTOM MODEL STATE 
+const customModel = {
+    loaded:  false,
+    name:    '',
+    scale:   1.0,
+    rotX:    0,
+    rotY:    0,
+};
+
+// EXPORT JSON HELPER 
+function downloadJSON(data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `perf_export_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+    a.click();
+}
+
+function exportPerformanceJSON() {
+    const snap = perfMonitor.snapshot;
+    const data = {
+        timestamp:       new Date().toISOString(),
+        fps:             snap.fps,
+        frameTime:       snap.cpuFrameMs,
+        gpuFrameTime:    snap.gpuFrameMs,
+        heapMemoryMB:    snap.heapMB,
+        drawCalls:       snap.drawCalls,
+        totalObjects:    cubeData.length,
+        renderedObjects: snap.rendered,
+        culledObjects:   snap.culledTotal,
+        cullingEfficiency: snap.cullEff + '%',
+        cameraPosition:  [...camera.position],
+        activeMethods: {
+            frustumCulling:   state.useFrustum,
+            octreeSpatial:    state.useOctree,
+            occlusionCulling: state.useOcclusion,
+            levelOfDetail:    state.useLOD,
+        },
+        geometryType: currentGeoType,
+        sceneMode:    state.mode,
+    };
+    downloadJSON(data);
+    showToast('Performance data berhasil diekspor sebagai JSON.');
+}
+
 
 // STATE KONTROL (toggle dari UI)
 const state = {
     useFrustum:     true,
-    useOctree:      true,  
-    useOcclusion:   false, 
-    useLOD:         false,  
-    showBBox:       false,  
-    showLODColor:   false, 
-    objectCount:    5000,
+    useOctree:      true,   // [BARU]
+    useOcclusion:   false,  // [BARU]
+    useLOD:         false,  // [BARU]
+    showBBox:       false,  // [BARU]
+    showLODColor:   false,  // [BARU]
+    objectCount:    500,
     mode:           'random', // 'random' | 'clustered'
     paletteIdx:     0,
 };
 
 // GENERATE OBJECTS & BUILD OCTREE 
 let cubeData = [];
-let octreeCandidates = []; 
+let octreeCandidates = []; // Hasil query frustum via octree
 
 function regenerateObjects() {
     const count = state.objectCount;
@@ -171,20 +261,31 @@ function regenerateObjects() {
 
 regenerateObjects(); // Initial population
 
-
-// KEYBOARD CAMERA CONTROL (dipertahankan dari kode asli)
+// KEYBOARD CAMERA CONTROL 
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.code] = true;  e.preventDefault(); });
+window.addEventListener('keydown', e => {
+    // Jangan intercept keyboard saat user sedang mengetik di input/textarea/select
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    keys[e.code] = true;
+    e.preventDefault();
+});
 window.addEventListener('keyup',   e => { keys[e.code] = false; });
 
 const speed     = 1.5;
 const turnSpeed = 0.03;
 
-// [BARU] Mouse look
+// Mouse look — listen on document so Three.js overlay canvas doesn't block it
 let mouseDown = false;
 let lastMouseX = 0, lastMouseY = 0;
-renderer.canvas.addEventListener('mousedown', e => { mouseDown = true; lastMouseX = e.clientX; lastMouseY = e.clientY; renderer.canvas.requestPointerLock(); });
-renderer.canvas.addEventListener('mouseup',   () => { mouseDown = false; document.exitPointerLock(); });
+document.addEventListener('mousedown', e => {
+    // Jangan trigger camera movement saat klik di UI panel
+    if (e.target.closest('#left-panel') || e.target.closest('#left-panel-toggle')) return;
+    mouseDown = true;
+    lastMouseX = e.clientX; lastMouseY = e.clientY;
+    renderer.canvas.requestPointerLock();
+});
+document.addEventListener('mouseup', () => { mouseDown = false; document.exitPointerLock(); });
 document.addEventListener('mousemove', e => {
     if (!mouseDown) return;
     camera.yaw   += e.movementX * 0.002;
@@ -227,9 +328,9 @@ let lastTime   = performance.now();
 let frameCount = 0;
 let currentFPS = 0;
 
-// GAME LOOP  — dimodifikasi untuk pipeline baru
+// GAME LOOP  
 function gameLoop() {
-    perfMonitor.beginFrame(); // [BARU] mulai pengukuran frame
+    perfMonitor.beginFrame(); 
     renderer.render();
     shader.use();
 
@@ -296,14 +397,17 @@ function gameLoop() {
         }
 
         // STEP 3: RENDER (sama seperti kode asli, + scale & lodLevel uniform)
+        // Skip jika type = 'none' (activeMesh null)
+        if (!activeMesh) { drawnObjects++; continue; }
+
         shader.use();
         gl.uniform4f(offsetLoc,  data.pos[0], data.pos[1], data.pos[2], 0.0);
         gl.uniform3f(baseColorLoc, data.color[0], data.color[1], data.color[2]);
         gl.uniform1f(scaleLoc, data.scale * lodResult.scale);    // [BARU]
         gl.uniform1f(lodLevelLoc, state.showLODColor ? lodResult.level : 0); // [BARU]
 
-        cube.draw(shader.program);
-        perfMonitor.countDrawCall(); // [BARU]
+        activeMesh.draw(shader.program);  // pakai activeMesh (bisa ganti geometri)
+        perfMonitor.countDrawCall(); 
         drawnObjects++;
 
         // Tambahkan ke occluder list (hanya objek dekat saja)
@@ -311,7 +415,7 @@ function gameLoop() {
             occluders.push({ pos: data.pos, dist });
         }
 
-        // [BARU] Render bounding box jika debug mode aktif
+        // Render bounding box jika debug mode aktif
         if (state.showBBox && drawnObjects <= 500) { // limit 500 agar tidak lambat
             const bboxColor = lodResult.level === 0 ? [0,1,0] :
                               lodResult.level === 1 ? [1,1,0] : [1,0.3,0];
@@ -321,7 +425,7 @@ function gameLoop() {
 
     // FPS COUNTER 
     const totalCulled = cubeData.length - drawnObjects;
-    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length); 
+    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length); // [BARU]
 
     frameCount++;
     const now = performance.now();
@@ -330,7 +434,9 @@ function gameLoop() {
         frameCount = 0;
         lastTime   = now;
         updateStatsPanel(drawnObjects, culledFrustum, culledOcclusion, culledLOD);
-        chartPanel.update(perfMonitor, state); // [BARU] update chart data
+        chartPanel.update(perfMonitor, state); // update chart data
+        //  Update left panel performance tiles
+        leftPanel.updatePerf(perfMonitor.snapshot, camera, drawnObjects, cubeData.length - drawnObjects, cubeData.length);
     }
 
     requestAnimationFrame(gameLoop);
@@ -338,7 +444,7 @@ function gameLoop() {
 
 requestAnimationFrame(gameLoop);
 
-// UI PANEL [BARU] — Modern floating control panel
+// UI PANEL  — Modern floating control panel
 function updateStatsPanel(drawn, culledF, culledO, culledL) {
     const total   = cubeData.length;
     const culled  = total - drawn;
@@ -376,6 +482,7 @@ function bindToggle(id, key) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+    // ── RIGHT panel toggles (kept for backward compat) ──
     bindToggle('toggleFrustum',   'useFrustum');
     bindToggle('toggleOctree',    'useOctree');
     bindToggle('toggleOcclusion', 'useOcclusion');
@@ -383,70 +490,105 @@ window.addEventListener('DOMContentLoaded', () => {
     bindToggle('toggleBBox',      'showBBox');
     bindToggle('toggleLODColor',  'showLODColor');
 
-    // Slider jumlah objek — regenerate dengan debounce 400ms
+    // ── RIGHT panel slider ──
     const slider = document.getElementById('obj-slider');
     if (slider) {
         slider.value = state.objectCount;
-
         let debounceTimer = null;
-
         slider.addEventListener('input', e => {
-            // Update nilai & label langsung (real-time feedback)
             state.objectCount = parseInt(e.target.value);
             document.getElementById('obj-count-display').textContent =
                 state.objectCount.toLocaleString() + ' objects';
-
-            // Tunggu 400ms setelah slider berhenti bergerak, baru regenerate
             clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                regenerateObjects();
-            }, 400);
+            debounceTimer = setTimeout(() => regenerateObjects(), 400);
         });
-
-        // Backup: juga trigger saat mouse/touch dilepas (untuk kepastian)
-        slider.addEventListener('change', () => {
-            clearTimeout(debounceTimer);
-            regenerateObjects();
-        });
+        slider.addEventListener('change', () => { clearTimeout(debounceTimer); regenerateObjects(); });
     }
 
-    // Tombol Generate (tetap tersedia untuk force regenerate)
-    document.getElementById('btn-generate')?.addEventListener('click', () => {
-        regenerateObjects();
-    });
-
-    // Mode selector
-    document.getElementById('sel-mode')?.addEventListener('change', e => {
-        state.mode = e.target.value;
-    });
-
-    // Palette selector
-    document.getElementById('sel-palette')?.addEventListener('change', e => {
-        state.paletteIdx = parseInt(e.target.value);
-    });
-
-    // GLTF Upload placeholder [BARU]
-    document.getElementById('btn-upload')?.addEventListener('click', () => {
-        document.getElementById('file-input').click();
-    });
+    document.getElementById('btn-generate')?.addEventListener('click', () => regenerateObjects());
+    document.getElementById('sel-mode')?.addEventListener('change', e => { state.mode = e.target.value; });
+    document.getElementById('sel-palette')?.addEventListener('change', e => { state.paletteIdx = parseInt(e.target.value); });
+    document.getElementById('btn-upload')?.addEventListener('click', () => document.getElementById('file-input').click());
     document.getElementById('file-input')?.addEventListener('change', handleFileUpload);
+    document.getElementById('btn-perf')?.addEventListener('click', () => chartPanel.toggle());
 
-    // Performance Dashboard button
-    document.getElementById('btn-perf')?.addEventListener('click', () => {
-        chartPanel.toggle();
+    // MOUNT LEFT PANEL — Fitur 1, 2, 3, 4, 5, 6
+    leftPanel.mount({
+        // Fitur 2: Object type changed
+        onObjType: (type) => {
+            setGeometryType(type);
+            showToast(`Geometry changed to: ${type.toUpperCase()}`);
+        },
+
+        // Fitur 3: File upload → Three.js ModelLoader
+        onUpload: (file, ext) => {
+            showToast(`Memuat "${file.name}"...`);
+            modelLoader.loadFile(file);
+        },
+        onDeleteModel: () => {
+            modelLoader.removeModel();
+            // Kembali ke cube
+            currentGeoType = 'cube';
+            activeMesh = new Mesh(gl);
+            showToast('Custom model dihapus. Geometry kembali ke Cube.');
+        },
+        onModelScale: (v)  => { modelLoader.setScale(v); },
+        onModelRotX:  (v)  => { modelLoader.setRotX(v); },
+        onModelRotY:  (v)  => { modelLoader.setRotY(v); },
+
+        // Scene control
+        onObjCount: (count) => {
+            state.objectCount = count;
+            regenerateObjects();
+            // Sync hidden right panel slider
+            const rs = document.getElementById('obj-slider');
+            if (rs) rs.value = count;
+        },
+        onMode:    (mode)  => { state.mode = mode; },
+        onPalette: (idx)   => { state.paletteIdx = idx; },
+        onGenerate: ()     => { regenerateObjects(); },
+
+        // Culling toggles from left panel
+        onStateChange: (key, val) => {
+            state[key] = val;
+            if (key === 'useLOD')       lod.enabled       = val;
+            if (key === 'useOcclusion') occlusion.enabled = val;
+            // Also sync right panel checkboxes
+            const rightId = key.replace(/([A-Z])/g, m => m).replace('use','toggle').replace('show','toggle');
+            // Map key → right panel checkbox id
+            const rightMap = {
+                useFrustum:   'toggleFrustum',
+                useOctree:    'toggleOctree',
+                useOcclusion: 'toggleOcclusion',
+                useLOD:       'toggleLOD',
+                showBBox:     'toggleBBox',
+                showLODColor: 'toggleLODColor',
+            };
+            const rEl = document.getElementById(rightMap[key]);
+            if (rEl) rEl.checked = val;
+        },
+
+        // Fitur 5: Export JSON
+        onExportJSON: () => exportPerformanceJSON(),
+
+        // Performance chart panel
+        onChartPanel: () => chartPanel.toggle(),
     });
+
+    leftPanel.syncState(state);
+    leftPanel.syncObjCount(state.objectCount);
 
     // Update awal
     updateStatsPanel(0, 0, 0, 0);
     updateUI_ObjectCount(state.objectCount);
 });
 
-// FILE UPLOAD HANDLER (GLTF/OBJ placeholder) [BARU]
+// FILE UPLOAD HANDLER (GLTF/OBJ placeholder) 
 function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
-    const ext = file.name.split('.').pop().toLowerCase();
-    showToast(`File "${file.name}" diterima (format: ${ext.toUpperCase()}). GLTF loader memerlukan Three.js. Untuk penelitian ini, objek custom dapat diintegrasikan via Three.js GLTFLoader.`);
+    showToast(`Memuat "${file.name}"...`);
+    modelLoader.loadFile(file);
 }
 
 function showToast(msg) {

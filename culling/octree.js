@@ -34,7 +34,6 @@ class OctreeNode {
     }
 }
 
-
 // Octree — pohon utama
 export class Octree {
     /**
@@ -58,10 +57,8 @@ export class Octree {
         };
     }
 
-    // ──────────────────────────────────────────────────────
-    // INSERT: Masukkan objek ke dalam octree
-    // ──────────────────────────────────────────────────────
 
+    // INSERT: Masukkan objek ke dalam octree
     insert(obj) {
         this._insertNode(this.root, obj);
         this.stats.totalObjects++;
@@ -127,11 +124,10 @@ export class Octree {
         }
     }
 
-    // ──────────────────────────────────────────────────────
+
     // QUERY: Kumpulkan semua objek yang lolos frustum culling
     // Ini adalah inti optimasi: node yang di luar frustum di-skip
     // tanpa traverse ke bawah
-    // ──────────────────────────────────────────────────────
 
     /**
      * Kumpulkan semua objek yang visible (lolos frustum culling via octree)
@@ -164,6 +160,7 @@ export class Octree {
             }
         }
     }
+
 
     // REBUILD: Buat ulang octree (dipakai saat generate objek baru)
     rebuild(objects) {

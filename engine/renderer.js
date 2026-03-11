@@ -8,7 +8,7 @@ export class Renderer {
             return;
         }
 
-        // [BARU] Aktifkan depth testing (penting untuk scene 3D yang benar)
+        // Aktifkan depth testing (penting untuk scene 3D yang benar)
         this.gl.enable(this.gl.DEPTH_TEST);
         this.gl.depthFunc(this.gl.LEQUAL);
 

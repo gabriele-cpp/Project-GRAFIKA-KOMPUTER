@@ -31,7 +31,7 @@ body, html {
     cursor: crosshair;
 }
 
-/* HUD OVERLAY — scanline effect*/
+/* HUD OVERLAY — scanline effect */
 #hud-overlay {
     pointer-events: none;
     position: fixed; inset: 0;
@@ -42,7 +42,7 @@ body, html {
     z-index: 1;
 }
 
-/* FPS COUNTER (top-left)*/
+/* FPS COUNTER (top-left) */
 #fps-panel {
     position: fixed; top: 16px; left: 16px;
     z-index: 10;
@@ -106,7 +106,7 @@ body, html {
     display: block;
 }
 
-/* CONTROL PANEL (right side)*/
+/* CONTROL PANEL (right side) */
 #control-panel {
     position: fixed; top: 80px; right: 16px;
     z-index: 10;
@@ -285,9 +285,11 @@ select:last-child { margin-bottom: 0; }
 }
 .btn.btn-primary:hover { background: linear-gradient(135deg, rgba(0,200,255,0.3), rgba(123,47,255,0.3)); }
 
-/* CULLING BREAKDOWN (bottom-left)*/
+/* ============================================================
+   CULLING BREAKDOWN (bottom-left)
+   ============================================================ */
 #cull-breakdown {
-    position: fixed; bottom: 16px; left: 16px;
+    position: fixed; bottom: 90px; right: 16px;
     z-index: 10;
     background: var(--panel-bg);
     border: 1px solid var(--border);
@@ -351,7 +353,7 @@ select:last-child { margin-bottom: 0; }
     margin-right: 4px;
 }
 
-/* TOAST Notification*/
+/* TOAST Notification */
 #toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     z-index: 100;

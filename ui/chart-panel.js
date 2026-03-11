@@ -1,3 +1,19 @@
+// ============================================================
+// ui/chart-panel.js  [BARU]
+//
+// Dashboard performa real-time dengan Chart.js
+// Menampilkan 6 chart sekaligus:
+//   1. FPS over time
+//   2. CPU Frame Time (ms)
+//   3. GPU Frame Time (ms) — jika browser support
+//   4. JS Heap Memory (MB)
+//   5. Rendered vs Culled objects
+//   6. Culling Efficiency (%)
+//
+// + Summary card untuk nilai rata-rata, min, max
+// + Tombol Export CSV untuk keperluan penelitian
+// ============================================================
+
 const CHART_COLOR = {
     fps:     { line: '#00ff88', fill: 'rgba(0,255,136,0.08)' },
     cpu:     { line: '#00c8ff', fill: 'rgba(0,200,255,0.08)' },
@@ -67,6 +83,7 @@ function buildPanelHTML() {
       </div>
       <div class="perf-header-right">
         <button class="perf-btn" id="perf-export-csv">⬇ Export CSV</button>
+        <button class="perf-btn perf-btn-json" id="perf-export-json">⬇ Export JSON</button>
         <button class="perf-btn" id="perf-clear">⟳ Clear</button>
         <button class="perf-close" id="perf-close">✕</button>
       </div>
@@ -368,6 +385,8 @@ export class ChartPanel {
             });
         });
         document.getElementById('perf-export-csv')?.addEventListener('click', () => this._exportCSV());
+        // Export JSON — reuse same row data but output as JSON
+        document.getElementById('perf-export-json')?.addEventListener('click', () => this._exportJSON());
     }
 
     _exportCSV() {
@@ -380,6 +399,44 @@ export class ChartPanel {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `perf_data_${Date.now()}.csv`;
+        a.click();
+    }
+
+    _exportJSON() {
+        if (!this._csvRows.length) { alert('Belum ada data yang direkam.'); return; }
+        // Ambil snapshot terbaru (row terakhir)
+        const latest = this._csvRows[this._csvRows.length - 1];
+        const allRows = this._csvRows.map(r => ({
+            timestamp:        r.ts,
+            fps:              r.fps,
+            frameTime:        r.cpuMs,
+            gpuFrameTime:     r.gpuMs,
+            heapMemoryMB:     r.heapMB,
+            drawCalls:        r.drawCalls,
+            renderedObjects:  r.rendered,
+            culledObjects:    r.culled,
+            cullingEfficiency: r.cullEff + '%',
+            frameBudgetPct:   r.budget,
+        }));
+        const output = {
+            exportedAt:   new Date().toISOString(),
+            totalSamples: allRows.length,
+            summary: {
+                fps:              latest.fps,
+                frameTime:        latest.cpuMs,
+                gpuFrameTime:     latest.gpuMs,
+                heapMemoryMB:     latest.heapMB,
+                drawCalls:        latest.drawCalls,
+                renderedObjects:  latest.rendered,
+                culledObjects:    latest.culled,
+                cullingEfficiency: latest.cullEff + '%',
+            },
+            samples: allRows,
+        };
+        const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `perf_data_${Date.now()}.json`;
         a.click();
     }
 
@@ -444,6 +501,13 @@ export class ChartPanel {
     cursor: pointer; transition: 0.15s;
 }
 .perf-btn:hover { background: rgba(0,200,255,0.18); }
+
+.perf-btn-json {
+    background: rgba(0,255,136,0.08);
+    border-color: rgba(0,255,136,0.3);
+    color: #00ff88;
+}
+.perf-btn-json:hover { background: rgba(0,255,136,0.2); }
 
 .perf-close {
     padding: 5px 10px;

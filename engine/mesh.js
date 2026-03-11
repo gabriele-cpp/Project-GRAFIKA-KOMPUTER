@@ -1,3 +1,7 @@
+// ============================================================
+// engine/mesh.js  (dipertahankan dari kode asli — tidak ada perubahan)
+// Berisi data vertex, normal, dan index untuk sebuah kubus satuan
+// ============================================================
 export class Mesh {
     constructor(gl) {
         this.gl = gl;
