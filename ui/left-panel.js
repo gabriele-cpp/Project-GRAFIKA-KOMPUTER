@@ -38,50 +38,6 @@ const PANEL_HTML = `
     </div>
   </section>
 
-  <!-- ════ CUSTOM MODEL ════ -->
-  <section class="lp-section" id="sec-model">
-    <div class="lp-sec-header" data-target="body-model">
-      <span class="lp-sec-icon">⬡</span> Custom Model
-      <span class="lp-chevron">▾</span>
-    </div>
-    <div class="lp-sec-body" id="body-model">
-
-      <div class="upload-zone" id="upload-zone">
-        <div class="upload-icon">↑</div>
-        <div class="upload-label">Drop GLTF / GLB / OBJ</div>
-        <div class="upload-sub">or click to browse</div>
-      </div>
-      <input type="file" id="lp-file-input" accept=".gltf,.glb,.obj" style="display:none">
-
-      <div id="model-controls" style="display:none">
-        <div class="lp-label">Loaded: <span id="model-name" style="color:var(--lp-accent)">—</span></div>
-
-        <div class="lp-field">
-          <label class="lp-label">Scale</label>
-          <div class="lp-slider-row">
-            <input type="range"  id="ctrl-scale" min="0.1" max="5" step="0.1" value="1">
-            <input type="number" id="num-scale"  class="lp-num-input" min="0.1" max="5" step="0.1" value="1">
-          </div>
-        </div>
-        <div class="lp-field">
-          <label class="lp-label">Rotate X</label>
-          <div class="lp-slider-row">
-            <input type="range"  id="ctrl-rotX" min="-180" max="180" step="1" value="0">
-            <input type="number" id="num-rotX"  class="lp-num-input" min="-180" max="180" step="1" value="0">
-          </div>
-        </div>
-        <div class="lp-field">
-          <label class="lp-label">Rotate Y</label>
-          <div class="lp-slider-row">
-            <input type="range"  id="ctrl-rotY" min="-180" max="180" step="1" value="0">
-            <input type="number" id="num-rotY"  class="lp-num-input" min="-180" max="180" step="1" value="0">
-          </div>
-        </div>
-        <button class="lp-btn lp-btn-danger" id="btn-delete-model">✕ Delete Model</button>
-      </div>
-    </div>
-  </section>
-
   <!-- ════ SCENE CONTROL ════ -->
   <section class="lp-section" id="sec-scene">
     <div class="lp-sec-header" data-target="body-scene">
@@ -598,7 +554,6 @@ export class LeftPanel {
         this._bindToggle();
         this._bindSections();
         this._bindObjectType();
-        this._bindUpload();
         this._bindScene();
         this._bindCullingToggles();
         this._bindPerf();
@@ -696,78 +651,6 @@ export class LeftPanel {
             grid.querySelectorAll('.obj-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
             this.callbacks.onObjType?.(type);
         });
-    }
-
-    _bindUpload() {
-        const zone   = document.getElementById('upload-zone');
-        const input  = document.getElementById('lp-file-input');
-        const delBtn = document.getElementById('btn-delete-model');
-
-        zone?.addEventListener('click', () => input?.click());
-
-        // Drag & drop
-        zone?.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-        zone?.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-        zone?.addEventListener('drop', e => {
-            e.preventDefault();
-            zone.classList.remove('drag-over');
-            const file = e.dataTransfer.files[0];
-            if (file) this._handleFile(file);
-        });
-
-        input?.addEventListener('change', e => {
-            const file = e.target.files[0];
-            if (file) this._handleFile(file);
-        });
-
-        // Scale — slider & number sync
-        const scaleSync = (v) => {
-            v = Math.max(0.1, Math.min(5, parseFloat(v) || 1));
-            document.getElementById('ctrl-scale').value = v;
-            document.getElementById('num-scale').value  = v.toFixed(1);
-            this.callbacks.onModelScale?.(v);
-        };
-        document.getElementById('ctrl-scale')?.addEventListener('input',  e => scaleSync(e.target.value));
-        document.getElementById('num-scale')?.addEventListener('input',   e => scaleSync(e.target.value));
-        document.getElementById('num-scale')?.addEventListener('keydown', e => { if(e.key==='Enter') scaleSync(e.target.value); });
-
-        // Rotate X — slider & number sync
-        const rotXSync = (v) => {
-            v = Math.max(-180, Math.min(180, parseInt(v) || 0));
-            document.getElementById('ctrl-rotX').value = v;
-            document.getElementById('num-rotX').value  = v;
-            this.callbacks.onModelRotX?.(v);
-        };
-        document.getElementById('ctrl-rotX')?.addEventListener('input',  e => rotXSync(e.target.value));
-        document.getElementById('num-rotX')?.addEventListener('input',   e => rotXSync(e.target.value));
-        document.getElementById('num-rotX')?.addEventListener('keydown', e => { if(e.key==='Enter') rotXSync(e.target.value); });
-
-        // Rotate Y — slider & number sync
-        const rotYSync = (v) => {
-            v = Math.max(-180, Math.min(180, parseInt(v) || 0));
-            document.getElementById('ctrl-rotY').value = v;
-            document.getElementById('num-rotY').value  = v;
-            this.callbacks.onModelRotY?.(v);
-        };
-        document.getElementById('ctrl-rotY')?.addEventListener('input',  e => rotYSync(e.target.value));
-        document.getElementById('num-rotY')?.addEventListener('input',   e => rotYSync(e.target.value));
-        document.getElementById('num-rotY')?.addEventListener('keydown', e => { if(e.key==='Enter') rotYSync(e.target.value); });
-
-        delBtn?.addEventListener('click', () => {
-            this._modelLoaded = false;
-            document.getElementById('model-controls').style.display = 'none';
-            document.getElementById('upload-zone').style.display = '';
-            this.callbacks.onDeleteModel?.();
-        });
-    }
-
-    _handleFile(file) {
-        const ext = file.name.split('.').pop().toLowerCase();
-        document.getElementById('model-name').textContent = file.name;
-        document.getElementById('upload-zone').style.display = 'none';
-        document.getElementById('model-controls').style.display = '';
-        this._modelLoaded = true;
-        this.callbacks.onUpload?.(file, ext);
     }
 
     _bindScene() {

@@ -13,8 +13,9 @@ import { generateObjects, generateClustered } from './objects/objects.js'; // [B
 import { PerformanceMonitor }               from './engine/performance.js'; // [BARU]
 import { ChartPanel }                       from './ui/chart-panel.js';     // [BARU]
 import { LeftPanel }                        from './ui/left-panel.js';      // [BARU — Fitur 1-6]
-import { createGeometry, GeometryMesh, GEOMETRY_TYPES }  from './engine/geometry.js';    // [BARU — Fitur 2]
-import { ModelLoader }                     from './engine/model-loader.js'; // [BARU — Three.js loader]
+import { createGeometry, GeometryMesh, GEOMETRY_TYPES }  from './engine/geometry.js';
+import { ModelImporter }                    from './engine/model-importer.js'; // [BARU] right panel loader
+import { ImportPanel }                      from './ui/import-panel.js';       // [BARU] right sidebar
 
 // SHADER 
 const vertexShaderCode = `
@@ -160,37 +161,28 @@ function setGeometryType(type) {
     }
 }
 
-// THREE.JS MODEL LOADER [BARU]
-const modelLoader = new ModelLoader();
+// IMPORT PANEL + MODEL IMPORTER [BARU]
+const importPanel   = new ImportPanel();
+const modelImporter = new ModelImporter();
 
-modelLoader.onLoad = (filename) => {
-    // Ekstrak geometry dari Three.js model → inject ke WebGL pipeline
-    // Ini memungkinkan model dirender sebagai activeMesh (bisa 1–50000 instances)
-    setTimeout(() => {
-        const geo = modelLoader.extractGeometry();
-        if (geo && geo.indices.length > 0) {
-            activeMesh    = new GeometryMesh(gl, geo.vertices, geo.normals, geo.indices);
-            currentGeoType = 'custom';
-            showToast(`"${filename}" siap — ${state.objectCount} instances di scene!`);
-        } else {
-            showToast(`Model "${filename}" ditampilkan (Three.js overlay). Geometry extraction gagal.`);
-        }
-    }, 300); // delay kecil agar Three.js selesai setup matrixWorld
-};
-modelLoader.onError = (msg) => {
-    showToast(`Error: ${msg}`);
-};
-modelLoader.onProgress = (pct) => {
-    if (pct < 100) showToast(`Loading model... ${pct}%`);
-};
+let importedMesh      = null;
+let importedInstances = [];
+let importedScaleX    = 1.0;
+let importedScaleY    = 1.0;
+let importedScaleZ    = 1.0;
 
-// CUSTOM MODEL STATE 
-const customModel = {
-    loaded:  false,
-    name:    '',
-    scale:   1.0,
-    rotX:    0,
-    rotY:    0,
+modelImporter.onLoad = (filename, meta) => {
+    importPanel.setModelLoaded(filename, meta);
+    showToast(`"${filename}" berhasil dimuat!`);
+};
+modelImporter.onError    = (msg) => { showToast(`Error: ${msg}`); };
+modelImporter.onProgress = (pct) => { importPanel.setProgress(pct); };
+modelImporter.onGeometryReady = (geo, positions, sx, sy, sz) => {
+    importedMesh      = geo.indices.length > 0
+        ? new GeometryMesh(gl, geo.vertices, geo.normals, geo.indices)
+        : null;
+    importedInstances = positions;
+    importedScaleX = sx; importedScaleY = sy; importedScaleZ = sz;
 };
 
 // EXPORT JSON HELPER 
@@ -283,6 +275,8 @@ document.addEventListener('mousedown', e => {
     if (e.target.closest('#left-panel'))       return;
     if (e.target.closest('#left-panel-toggle')) return;
     if (e.target.closest('#perf-overlay'))      return;
+    if (e.target.closest('#import-panel'))      return;
+    if (e.target.closest('#ip-toggle'))         return;
     mouseDown = true;
     lastMouseX = e.clientX; lastMouseY = e.clientY;
     renderer.canvas.requestPointerLock();
@@ -427,17 +421,29 @@ function gameLoop() {
 
     // FPS COUNTER 
     const totalCulled = cubeData.length - drawnObjects;
-    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length); // [BARU]
+    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length);
+
+    // ── RENDER IMPORTED INSTANCES (from right panel) ──
+    // Terpisah dari cubeData pipeline, tidak kena culling (jumlah max 100)
+    if (importedMesh && importedInstances.length > 0) {
+        shader.use();
+        for (const pos of importedInstances) {
+            gl.uniform4f(offsetLoc, pos[0], pos[1], pos[2], 0.0);
+            gl.uniform3f(baseColorLoc, 0.0, 0.78, 1.0); // cyan — bisa dikustomisasi
+            gl.uniform1f(scaleLoc, importedScaleX);
+            gl.uniform1f(lodLevelLoc, 0);
+            importedMesh.draw(shader.program);
+        }
+    }
 
     frameCount++;
     const now = performance.now();
-    if (now - lastTime >= 500) { // Update setiap 0.5 detik untuk angka lebih stabil
+    if (now - lastTime >= 500) {
         currentFPS = Math.round(frameCount / ((now - lastTime) / 1000));
         frameCount = 0;
         lastTime   = now;
         updateStatsPanel(drawnObjects, culledFrustum, culledOcclusion, culledLOD);
-        chartPanel.update(perfMonitor, state); // update chart data
-        //  Update left panel performance tiles
+        chartPanel.update(perfMonitor, state);
         leftPanel.updatePerf(perfMonitor.snapshot, camera, drawnObjects, cubeData.length - drawnObjects, cubeData.length);
     }
 
@@ -510,8 +516,6 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-generate')?.addEventListener('click', () => regenerateObjects());
     document.getElementById('sel-mode')?.addEventListener('change', e => { state.mode = e.target.value; });
     document.getElementById('sel-palette')?.addEventListener('change', e => { state.paletteIdx = parseInt(e.target.value); });
-    document.getElementById('btn-upload')?.addEventListener('click', () => document.getElementById('file-input').click());
-    document.getElementById('file-input')?.addEventListener('change', handleFileUpload);
     document.getElementById('btn-perf')?.addEventListener('click', () => chartPanel.toggle());
 
     // MOUNT LEFT PANEL — Fitur 1, 2, 3, 4, 5, 6
@@ -522,21 +526,7 @@ window.addEventListener('DOMContentLoaded', () => {
             showToast(`Geometry changed to: ${type.toUpperCase()}`);
         },
 
-        // Fitur 3: File upload → Three.js ModelLoader
-        onUpload: (file, ext) => {
-            showToast(`Memuat "${file.name}"...`);
-            modelLoader.loadFile(file);
-        },
-        onDeleteModel: () => {
-            modelLoader.removeModel();
-            // Kembali ke cube
-            currentGeoType = 'cube';
-            activeMesh = new Mesh(gl);
-            showToast('Custom model dihapus. Geometry kembali ke Cube.');
-        },
-        onModelScale: (v)  => { modelLoader.setScale(v); },
-        onModelRotX:  (v)  => { modelLoader.setRotX(v); },
-        onModelRotY:  (v)  => { modelLoader.setRotY(v); },
+
 
         // Scene control
         onObjCount: (count) => {
@@ -580,18 +570,37 @@ window.addEventListener('DOMContentLoaded', () => {
     leftPanel.syncState(state);
     leftPanel.syncObjCount(state.objectCount);
 
+    // Mount Import Panel (right sidebar)
+    importPanel.mount({
+        onUpload: (file) => {
+            modelImporter.loadFile(file);
+        },
+        onRemove: () => {
+            modelImporter.remove();
+            importedMesh      = null;
+            importedInstances = [];
+            showToast('Model dihapus dari scene.');
+        },
+        onInstanceCount: (n) => {
+            modelImporter.setInstanceCount(n);
+        },
+        onScale: ({ x, y, z }) => {
+            modelImporter.setScale(x, y, z);
+        },
+        onError: (msg) => { showToast(msg); },
+    });
+
+    // Exclude import panel from camera drag
+    document.addEventListener('mousedown', e => {
+        if (e.target.closest('#import-panel') || e.target.closest('#ip-toggle')) {
+            // handled inside importPanel / modelImporter
+        }
+    }, true);
+
     // Update awal
     updateStatsPanel(0, 0, 0, 0);
     updateUI_ObjectCount(state.objectCount);
 });
-
-// FILE UPLOAD HANDLER (GLTF/OBJ placeholder) 
-function handleFileUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    showToast(`Memuat "${file.name}"...`);
-    modelLoader.loadFile(file);
-}
 
 function showToast(msg) {
     const t = document.getElementById('toast');
