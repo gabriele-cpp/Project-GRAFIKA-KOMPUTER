@@ -1,9 +1,10 @@
 /**
  * Buat GeometryMesh dari data vertex+normal+index yang diberikan.
  * Interface-nya identik dengan Mesh asli (draw() method).
+ * Opsional: colors array (per-vertex RGB) untuk imported model.
  */
 export class GeometryMesh {
-    constructor(gl, vertices, normals, indices) {
+    constructor(gl, vertices, normals, indices, colors = null) {
         this.gl = gl;
 
         this.vertexBuffer = gl.createBuffer();
@@ -13,6 +14,16 @@ export class GeometryMesh {
         this.normalBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+        // Color buffer (optional — only for imported models)
+        this.colorBuffer = null;
+        this.hasColors   = false;
+        if (colors && colors.length > 0) {
+            this.colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+            this.hasColors = true;
+        }
 
         this.indexBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
@@ -37,6 +48,16 @@ export class GeometryMesh {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
         gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(normLoc);
+
+        // Bind vertex color buffer if available
+        const colLoc = gl.getAttribLocation(shaderProgram, 'aVertexColor');
+        if (this.hasColors && this.colorBuffer && colLoc >= 0) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
+            gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(colLoc);
+        } else if (colLoc >= 0) {
+            gl.disableVertexAttribArray(colLoc);
+        }
 
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
         gl.drawElements(gl.TRIANGLES, this.indexCount, this.indexType, 0);

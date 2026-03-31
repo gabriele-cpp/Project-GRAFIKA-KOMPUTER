@@ -13,8 +13,9 @@ import { generateObjects, generateClustered } from './objects/objects.js'; // [B
 import { PerformanceMonitor }               from './engine/performance.js'; // [BARU]
 import { ChartPanel }                       from './ui/chart-panel.js';     // [BARU]
 import { LeftPanel }                        from './ui/left-panel.js';      // [BARU — Fitur 1-6]
-import { createGeometry, GeometryMesh, GEOMETRY_TYPES }  from './engine/geometry.js';    // [BARU — Fitur 2]
-import { ModelLoader }                     from './engine/model-loader.js'; // [BARU — Three.js loader]
+import { createGeometry, GeometryMesh, GEOMETRY_TYPES }  from './engine/geometry.js';
+import { ModelImporter }                    from './engine/model-importer.js'; // [BARU] right panel loader
+import { ImportPanel }                      from './ui/import-panel.js';       // [BARU] right sidebar
 
 // SHADER 
 const vertexShaderCode = `
@@ -81,6 +82,7 @@ const bbFragmentCode = `
     void main() { gl_FragColor = vec4(uBBoxColor, 1.0); }
 `;
 
+
 // BOUNDING BOX WIRE MESH (12 garis = 24 vertex)
 function createBBoxMesh(gl) {
     // 8 corner cube ±1
@@ -108,33 +110,32 @@ const gl       = renderer.gl;
 
 const shader   = new Shader(gl, vertexShaderCode,  fragmentShaderCode);
 const bbShader = new Shader(gl, bbVertexCode,       bbFragmentCode);
-// cube removed — replaced by activeMesh (see geometry system below)
 const bbox     = createBBoxMesh(gl);
 
 const aspect   = renderer.canvas.width / renderer.canvas.height;
 const camera   = new Camera(Math.PI / 4, aspect, 0.1, 2000.0);
 
 // Culling systems
-const frustum  = new Frustum();
-const octree   = new Octree(600, 5, 20);   // [BARU] world size 600, max depth 5
-const lod      = new LOD();                 // [BARU]
-const occlusion = new OcclusionCuller();    // [BARU]
+const frustum   = new Frustum();
+const octree    = new Octree(600, 5, 20);
+const lod       = new LOD();
+const occlusion = new OcclusionCuller();
 
-// Uniform locations 
-const viewLoc       = gl.getUniformLocation(shader.program, 'uViewMatrix');
-const projLoc       = gl.getUniformLocation(shader.program, 'uProjectionMatrix');
-const offsetLoc     = gl.getUniformLocation(shader.program, 'uOffset');
-const scaleLoc      = gl.getUniformLocation(shader.program, 'uScale');         // [BARU]
-const lightDirLoc   = gl.getUniformLocation(shader.program, 'uLightDirection');
-const baseColorLoc  = gl.getUniformLocation(shader.program, 'uBaseColor');
-const lodLevelLoc   = gl.getUniformLocation(shader.program, 'uLodLevel');      // [BARU]
+// Uniform locations — main shader
+const viewLoc      = gl.getUniformLocation(shader.program, 'uViewMatrix');
+const projLoc      = gl.getUniformLocation(shader.program, 'uProjectionMatrix');
+const offsetLoc    = gl.getUniformLocation(shader.program, 'uOffset');
+const scaleLoc     = gl.getUniformLocation(shader.program, 'uScale');
+const lightDirLoc  = gl.getUniformLocation(shader.program, 'uLightDirection');
+const baseColorLoc = gl.getUniformLocation(shader.program, 'uBaseColor');
+const lodLevelLoc  = gl.getUniformLocation(shader.program, 'uLodLevel');
 
-// BBox uniform locations 
-const bbViewLoc    = gl.getUniformLocation(bbShader.program, 'uViewMatrix');
-const bbProjLoc    = gl.getUniformLocation(bbShader.program, 'uProjectionMatrix');
-const bbOffsetLoc  = gl.getUniformLocation(bbShader.program, 'uOffset');
-const bbScaleLoc   = gl.getUniformLocation(bbShader.program, 'uScale');
-const bbColorLoc   = gl.getUniformLocation(bbShader.program, 'uBBoxColor');
+// Uniform locations — bbox shader
+const bbViewLoc  = gl.getUniformLocation(bbShader.program, 'uViewMatrix');
+const bbProjLoc  = gl.getUniformLocation(bbShader.program, 'uProjectionMatrix');
+const bbOffsetLoc= gl.getUniformLocation(bbShader.program, 'uOffset');
+const bbScaleLoc = gl.getUniformLocation(bbShader.program, 'uScale');
+const bbColorLoc = gl.getUniformLocation(bbShader.program, 'uBBoxColor');
 
 const lightDirection = [0.8, 1.0, 0.5];
 
@@ -148,50 +149,50 @@ const leftPanel   = new LeftPanel();
 // Mengganti activeMesh tidak mengubah pipeline — hanya pointer.
 let activeMesh = new Mesh(gl); 
 let currentGeoType = 'cube';
+let _savedCubeData = []; // Simpan cubeData saat type = 'none', restore saat ganti ke type lain
 
 function setGeometryType(type) {
+    const prevType = currentGeoType;
     currentGeoType = type;
     if (type === 'none') {
-        activeMesh = null;  // null = skip draw call (scene kosong)
-    } else if (type === 'cube') {
-        activeMesh = new Mesh(gl); // pakai Mesh asli untuk cube
+        activeMesh = null;
+        // Simpan cubeData yang ada lalu kosongkan scene
+        if (cubeData.length > 0) {
+            _savedCubeData = cubeData;
+        }
+        cubeData = [];
+        octree.rebuild(cubeData);
     } else {
-        activeMesh = createGeometry(gl, type);
+        if (type === 'cube') {
+            activeMesh = new Mesh(gl); // pakai Mesh asli untuk cube
+        } else {
+            activeMesh = createGeometry(gl, type);
+        }
+        // Jika sebelumnya none, restore data yang tersimpan
+        if (prevType === 'none' && _savedCubeData.length > 0) {
+            cubeData = _savedCubeData;
+            _savedCubeData = [];
+            octree.rebuild(cubeData);
+        }
     }
 }
 
-// THREE.JS MODEL LOADER [BARU]
-const modelLoader = new ModelLoader();
+// IMPORT PANEL + MODEL IMPORTER [BARU]
+const importPanel   = new ImportPanel();
+const modelImporter = new ModelImporter();
 
-modelLoader.onLoad = (filename) => {
-    // Ekstrak geometry dari Three.js model → inject ke WebGL pipeline
-    // Ini memungkinkan model dirender sebagai activeMesh (bisa 1–50000 instances)
-    setTimeout(() => {
-        const geo = modelLoader.extractGeometry();
-        if (geo && geo.indices.length > 0) {
-            activeMesh    = new GeometryMesh(gl, geo.vertices, geo.normals, geo.indices);
-            currentGeoType = 'custom';
-            showToast(`"${filename}" siap — ${state.objectCount} instances di scene!`);
-        } else {
-            showToast(`Model "${filename}" ditampilkan (Three.js overlay). Geometry extraction gagal.`);
-        }
-    }, 300); // delay kecil agar Three.js selesai setup matrixWorld
-};
-modelLoader.onError = (msg) => {
-    showToast(`Error: ${msg}`);
-};
-modelLoader.onProgress = (pct) => {
-    if (pct < 100) showToast(`Loading model... ${pct}%`);
-};
 
-// CUSTOM MODEL STATE 
-const customModel = {
-    loaded:  false,
-    name:    '',
-    scale:   1.0,
-    rotX:    0,
-    rotY:    0,
+modelImporter.onLoad = (filename, meta, autoScale) => {
+    importPanel.setModelLoaded(filename, meta);
+    // Sync auto-scale ke slider UI agar tampilan konsisten
+    if (autoScale != null) {
+        importPanel.syncScale(autoScale);
+    }
+    showToast(`"${filename}" berhasil dimuat!`);
 };
+modelImporter.onError    = (msg) => { showToast(`Error: ${msg}`); };
+modelImporter.onProgress = (pct) => { importPanel.setProgress(pct); };
+modelImporter.onGeometryReady = () => {}; // Three.js handles rendering directly
 
 // EXPORT JSON HELPER 
 function downloadJSON(data) {
@@ -249,10 +250,21 @@ let octreeCandidates = []; // Hasil query frustum via octree
 
 function regenerateObjects() {
     const count = state.objectCount;
-    if (state.mode === 'clustered') {
-        cubeData = generateClustered(count, 500, 12);
+    if (currentGeoType === 'none') {
+        // Jika type none, simpan data tapi cubeData tetap kosong
+        if (state.mode === 'clustered') {
+            _savedCubeData = generateClustered(count, 500, 12);
+        } else {
+            _savedCubeData = generateObjects(count, 500, state.paletteIdx);
+        }
+        cubeData = [];
     } else {
-        cubeData = generateObjects(count, 500, state.paletteIdx);
+        if (state.mode === 'clustered') {
+            cubeData = generateClustered(count, 500, 12);
+        } else {
+            cubeData = generateObjects(count, 500, state.paletteIdx);
+        }
+        _savedCubeData = [];
     }
     // Rebuild octree dengan semua objek baru
     octree.rebuild(cubeData);
@@ -272,8 +284,8 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup',   e => { keys[e.code] = false; });
 
-const speed     = 1.5;
-const turnSpeed = 0.03;
+let speed     = 1.5;
+let turnSpeed = 0.03;
 
 // Mouse look — listen on document so Three.js overlay canvas doesn't block it
 let mouseDown = false;
@@ -283,6 +295,8 @@ document.addEventListener('mousedown', e => {
     if (e.target.closest('#left-panel'))       return;
     if (e.target.closest('#left-panel-toggle')) return;
     if (e.target.closest('#perf-overlay'))      return;
+    if (e.target.closest('#import-panel'))      return;
+    if (e.target.closest('#ip-toggle'))         return;
     mouseDown = true;
     lastMouseX = e.clientX; lastMouseY = e.clientY;
     renderer.canvas.requestPointerLock();
@@ -290,8 +304,8 @@ document.addEventListener('mousedown', e => {
 document.addEventListener('mouseup', () => { mouseDown = false; document.exitPointerLock(); });
 document.addEventListener('mousemove', e => {
     if (!mouseDown) return;
-    camera.yaw   += e.movementX * 0.002;
-    camera.pitch -= e.movementY * 0.002;
+    camera.yaw   += e.movementX * (turnSpeed * 0.07);
+    camera.pitch -= e.movementY * (turnSpeed * 0.07);
 });
 
 function updateCameraMovement() {
@@ -399,8 +413,8 @@ function gameLoop() {
         }
 
         // STEP 3: RENDER (sama seperti kode asli, + scale & lodLevel uniform)
-        // Skip jika type = 'none' (activeMesh null)
-        if (!activeMesh) { drawnObjects++; continue; }
+        // Skip jika type = 'none' (activeMesh null) — cubeData sudah dikosongkan, loop ini tidak akan dicapai
+        if (!activeMesh) { continue; }
 
         shader.use();
         gl.uniform4f(offsetLoc,  data.pos[0], data.pos[1], data.pos[2], 0.0);
@@ -427,17 +441,21 @@ function gameLoop() {
 
     // FPS COUNTER 
     const totalCulled = cubeData.length - drawnObjects;
-    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length); // [BARU]
+    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length);
+
+    // ── RENDER IMPORTED INSTANCES ──
+    // Sync kamera Three.js dengan kamera WebGL setiap frame, lalu render overlay.
+    modelImporter.syncCamera(camera);
+
 
     frameCount++;
     const now = performance.now();
-    if (now - lastTime >= 500) { // Update setiap 0.5 detik untuk angka lebih stabil
+    if (now - lastTime >= 500) {
         currentFPS = Math.round(frameCount / ((now - lastTime) / 1000));
         frameCount = 0;
         lastTime   = now;
         updateStatsPanel(drawnObjects, culledFrustum, culledOcclusion, culledLOD);
-        chartPanel.update(perfMonitor, state); // update chart data
-        //  Update left panel performance tiles
+        chartPanel.update(perfMonitor, state);
         leftPanel.updatePerf(perfMonitor.snapshot, camera, drawnObjects, cubeData.length - drawnObjects, cubeData.length);
     }
 
@@ -510,8 +528,6 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-generate')?.addEventListener('click', () => regenerateObjects());
     document.getElementById('sel-mode')?.addEventListener('change', e => { state.mode = e.target.value; });
     document.getElementById('sel-palette')?.addEventListener('change', e => { state.paletteIdx = parseInt(e.target.value); });
-    document.getElementById('btn-upload')?.addEventListener('click', () => document.getElementById('file-input').click());
-    document.getElementById('file-input')?.addEventListener('change', handleFileUpload);
     document.getElementById('btn-perf')?.addEventListener('click', () => chartPanel.toggle());
 
     // MOUNT LEFT PANEL — Fitur 1, 2, 3, 4, 5, 6
@@ -522,21 +538,7 @@ window.addEventListener('DOMContentLoaded', () => {
             showToast(`Geometry changed to: ${type.toUpperCase()}`);
         },
 
-        // Fitur 3: File upload → Three.js ModelLoader
-        onUpload: (file, ext) => {
-            showToast(`Memuat "${file.name}"...`);
-            modelLoader.loadFile(file);
-        },
-        onDeleteModel: () => {
-            modelLoader.removeModel();
-            // Kembali ke cube
-            currentGeoType = 'cube';
-            activeMesh = new Mesh(gl);
-            showToast('Custom model dihapus. Geometry kembali ke Cube.');
-        },
-        onModelScale: (v)  => { modelLoader.setScale(v); },
-        onModelRotX:  (v)  => { modelLoader.setRotX(v); },
-        onModelRotY:  (v)  => { modelLoader.setRotY(v); },
+
 
         // Scene control
         onObjCount: (count) => {
@@ -575,23 +577,44 @@ window.addEventListener('DOMContentLoaded', () => {
 
         // Performance chart panel
         onChartPanel: () => chartPanel.toggle(),
+
+        // Camera speed controls
+        onCameraSpeed:     (v) => { speed     = v; },
+        onCameraTurnSpeed: (v) => { turnSpeed = v; },
     });
 
     leftPanel.syncState(state);
     leftPanel.syncObjCount(state.objectCount);
 
+    // Mount Import Panel (right sidebar)
+    importPanel.mount({
+        onUpload: (files) => {
+            modelImporter.loadFiles(files);
+        },
+        onRemove: () => {
+            modelImporter.remove();
+            showToast('Model dihapus dari scene.');
+        },
+        onInstanceCount: (n) => {
+            modelImporter.setInstanceCount(n);
+        },
+        onScale: ({ x, y, z }) => {
+            modelImporter.setScale(x, y, z);
+        },
+        onError: (msg) => { showToast(msg); },
+    });
+
+    // Exclude import panel from camera drag
+    document.addEventListener('mousedown', e => {
+        if (e.target.closest('#import-panel') || e.target.closest('#ip-toggle')) {
+            // handled inside importPanel / modelImporter
+        }
+    }, true);
+
     // Update awal
     updateStatsPanel(0, 0, 0, 0);
     updateUI_ObjectCount(state.objectCount);
 });
-
-// FILE UPLOAD HANDLER (GLTF/OBJ placeholder) 
-function handleFileUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    showToast(`Memuat "${file.name}"...`);
-    modelLoader.loadFile(file);
-}
 
 function showToast(msg) {
     const t = document.getElementById('toast');

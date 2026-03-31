@@ -38,50 +38,6 @@ const PANEL_HTML = `
     </div>
   </section>
 
-  <!-- ════ CUSTOM MODEL ════ -->
-  <section class="lp-section" id="sec-model">
-    <div class="lp-sec-header" data-target="body-model">
-      <span class="lp-sec-icon">⬡</span> Custom Model
-      <span class="lp-chevron">▾</span>
-    </div>
-    <div class="lp-sec-body" id="body-model">
-
-      <div class="upload-zone" id="upload-zone">
-        <div class="upload-icon">↑</div>
-        <div class="upload-label">Drop GLTF / GLB / OBJ</div>
-        <div class="upload-sub">or click to browse</div>
-      </div>
-      <input type="file" id="lp-file-input" accept=".gltf,.glb,.obj" style="display:none">
-
-      <div id="model-controls" style="display:none">
-        <div class="lp-label">Loaded: <span id="model-name" style="color:var(--lp-accent)">—</span></div>
-
-        <div class="lp-field">
-          <label class="lp-label">Scale</label>
-          <div class="lp-slider-row">
-            <input type="range"  id="ctrl-scale" min="0.1" max="5" step="0.1" value="1">
-            <input type="number" id="num-scale"  class="lp-num-input" min="0.1" max="5" step="0.1" value="1">
-          </div>
-        </div>
-        <div class="lp-field">
-          <label class="lp-label">Rotate X</label>
-          <div class="lp-slider-row">
-            <input type="range"  id="ctrl-rotX" min="-180" max="180" step="1" value="0">
-            <input type="number" id="num-rotX"  class="lp-num-input" min="-180" max="180" step="1" value="0">
-          </div>
-        </div>
-        <div class="lp-field">
-          <label class="lp-label">Rotate Y</label>
-          <div class="lp-slider-row">
-            <input type="range"  id="ctrl-rotY" min="-180" max="180" step="1" value="0">
-            <input type="number" id="num-rotY"  class="lp-num-input" min="-180" max="180" step="1" value="0">
-          </div>
-        </div>
-        <button class="lp-btn lp-btn-danger" id="btn-delete-model">✕ Delete Model</button>
-      </div>
-    </div>
-  </section>
-
   <!-- ════ SCENE CONTROL ════ -->
   <section class="lp-section" id="sec-scene">
     <div class="lp-sec-header" data-target="body-scene">
@@ -160,6 +116,36 @@ const PANEL_HTML = `
         <span>LOD Color Mode</span>
         <div class="lp-switch"><input type="checkbox" id="lp-toggleLODColor"><span class="lp-track"></span></div>
       </label>
+    </div>
+  </section>
+
+  <!-- ════ CAMERA SPEED ════ -->
+  <section class="lp-section">
+    <div class="lp-sec-header" data-target="body-camspeed">
+      <span class="lp-sec-icon">🎮</span> Camera Speed
+      <span class="lp-chevron">▾</span>
+    </div>
+    <div class="lp-sec-body open" id="body-camspeed">
+      <div class="lp-field">
+        <label class="lp-label">Move Speed <span id="lp-val-speed">1.5</span></label>
+        <div class="lp-slider-row">
+          <input type="range" id="lp-speed-slider" min="0.1" max="20" step="0.1" value="1.5">
+          <input type="number" class="lp-num-input" id="lp-speed-num" min="0.1" max="20" step="0.1" value="1.5">
+        </div>
+      </div>
+      <div class="lp-field">
+        <label class="lp-label">Turn Speed <span id="lp-val-turnspeed">0.03</span></label>
+        <div class="lp-slider-row">
+          <input type="range" id="lp-turnspeed-slider" min="0.005" max="0.1" step="0.005" value="0.03">
+          <input type="number" class="lp-num-input" id="lp-turnspeed-num" min="0.005" max="0.1" step="0.005" value="0.03">
+        </div>
+      </div>
+      <div class="lp-speed-presets">
+        <button class="lp-preset-btn" data-speed="0.3" data-turn="0.01">🐢 Slow</button>
+        <button class="lp-preset-btn" data-speed="1.5" data-turn="0.03">🚶 Normal</button>
+        <button class="lp-preset-btn" data-speed="6.0" data-turn="0.06">🏃 Fast</button>
+        <button class="lp-preset-btn" data-speed="15.0" data-turn="0.08">🚀 Turbo</button>
+      </div>
     </div>
   </section>
 
@@ -434,6 +420,31 @@ input[type=range]::-webkit-slider-thumb {
   box-shadow: 0 0 6px rgba(0,200,255,0.2);
 }
 
+/* ── Speed presets ── */
+.lp-speed-presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: 8px;
+}
+.lp-preset-btn {
+  padding: 6px 4px;
+  background: rgba(0,200,255,0.05);
+  border: 1px solid var(--lp-border);
+  border-radius: 4px;
+  color: var(--lp-text);
+  font-size: 0.6rem;
+  font-family: var(--lp-mono);
+  cursor: pointer;
+  transition: 0.15s;
+  text-align: center;
+}
+.lp-preset-btn:hover {
+  background: rgba(0,200,255,0.15);
+  border-color: var(--lp-accent);
+  color: var(--lp-accent);
+}
+
 /* ── Buttons ── */
 .lp-btn {
   display: block; width: 100%;
@@ -598,9 +609,9 @@ export class LeftPanel {
         this._bindToggle();
         this._bindSections();
         this._bindObjectType();
-        this._bindUpload();
         this._bindScene();
         this._bindCullingToggles();
+        this._bindCameraSpeed();
         this._bindPerf();
     }
 
@@ -698,78 +709,6 @@ export class LeftPanel {
         });
     }
 
-    _bindUpload() {
-        const zone   = document.getElementById('upload-zone');
-        const input  = document.getElementById('lp-file-input');
-        const delBtn = document.getElementById('btn-delete-model');
-
-        zone?.addEventListener('click', () => input?.click());
-
-        // Drag & drop
-        zone?.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-        zone?.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-        zone?.addEventListener('drop', e => {
-            e.preventDefault();
-            zone.classList.remove('drag-over');
-            const file = e.dataTransfer.files[0];
-            if (file) this._handleFile(file);
-        });
-
-        input?.addEventListener('change', e => {
-            const file = e.target.files[0];
-            if (file) this._handleFile(file);
-        });
-
-        // Scale — slider & number sync
-        const scaleSync = (v) => {
-            v = Math.max(0.1, Math.min(5, parseFloat(v) || 1));
-            document.getElementById('ctrl-scale').value = v;
-            document.getElementById('num-scale').value  = v.toFixed(1);
-            this.callbacks.onModelScale?.(v);
-        };
-        document.getElementById('ctrl-scale')?.addEventListener('input',  e => scaleSync(e.target.value));
-        document.getElementById('num-scale')?.addEventListener('input',   e => scaleSync(e.target.value));
-        document.getElementById('num-scale')?.addEventListener('keydown', e => { if(e.key==='Enter') scaleSync(e.target.value); });
-
-        // Rotate X — slider & number sync
-        const rotXSync = (v) => {
-            v = Math.max(-180, Math.min(180, parseInt(v) || 0));
-            document.getElementById('ctrl-rotX').value = v;
-            document.getElementById('num-rotX').value  = v;
-            this.callbacks.onModelRotX?.(v);
-        };
-        document.getElementById('ctrl-rotX')?.addEventListener('input',  e => rotXSync(e.target.value));
-        document.getElementById('num-rotX')?.addEventListener('input',   e => rotXSync(e.target.value));
-        document.getElementById('num-rotX')?.addEventListener('keydown', e => { if(e.key==='Enter') rotXSync(e.target.value); });
-
-        // Rotate Y — slider & number sync
-        const rotYSync = (v) => {
-            v = Math.max(-180, Math.min(180, parseInt(v) || 0));
-            document.getElementById('ctrl-rotY').value = v;
-            document.getElementById('num-rotY').value  = v;
-            this.callbacks.onModelRotY?.(v);
-        };
-        document.getElementById('ctrl-rotY')?.addEventListener('input',  e => rotYSync(e.target.value));
-        document.getElementById('num-rotY')?.addEventListener('input',   e => rotYSync(e.target.value));
-        document.getElementById('num-rotY')?.addEventListener('keydown', e => { if(e.key==='Enter') rotYSync(e.target.value); });
-
-        delBtn?.addEventListener('click', () => {
-            this._modelLoaded = false;
-            document.getElementById('model-controls').style.display = 'none';
-            document.getElementById('upload-zone').style.display = '';
-            this.callbacks.onDeleteModel?.();
-        });
-    }
-
-    _handleFile(file) {
-        const ext = file.name.split('.').pop().toLowerCase();
-        document.getElementById('model-name').textContent = file.name;
-        document.getElementById('upload-zone').style.display = 'none';
-        document.getElementById('model-controls').style.display = '';
-        this._modelLoaded = true;
-        this.callbacks.onUpload?.(file, ext);
-    }
-
     _bindScene() {
         const slider = document.getElementById('lp-obj-slider');
         const numIn  = document.getElementById('lp-obj-num');
@@ -811,6 +750,46 @@ export class LeftPanel {
         Object.entries(map).forEach(([id, key]) => {
             document.getElementById(id)?.addEventListener('change', e =>
                 this.callbacks.onStateChange?.(key, e.target.checked));
+        });
+    }
+
+    _bindCameraSpeed() {
+        const syncSpeed = (raw) => {
+            let v = Math.max(0.1, Math.min(20, parseFloat(raw) || 1.5));
+            const slider = document.getElementById('lp-speed-slider');
+            const num    = document.getElementById('lp-speed-num');
+            const label  = document.getElementById('lp-val-speed');
+            if (slider) slider.value = v;
+            if (num)    num.value    = v.toFixed(1);
+            if (label)  label.textContent = v.toFixed(1);
+            this.callbacks.onCameraSpeed?.(v);
+        };
+
+        const syncTurn = (raw) => {
+            let v = Math.max(0.005, Math.min(0.1, parseFloat(raw) || 0.03));
+            const slider = document.getElementById('lp-turnspeed-slider');
+            const num    = document.getElementById('lp-turnspeed-num');
+            const label  = document.getElementById('lp-val-turnspeed');
+            if (slider) slider.value = v;
+            if (num)    num.value    = v.toFixed(3);
+            if (label)  label.textContent = v.toFixed(3);
+            this.callbacks.onCameraTurnSpeed?.(v);
+        };
+
+        document.getElementById('lp-speed-slider')?.addEventListener('input',  e => syncSpeed(e.target.value));
+        document.getElementById('lp-speed-num')?.addEventListener('input',     e => syncSpeed(e.target.value));
+        document.getElementById('lp-speed-num')?.addEventListener('keydown',   e => { if (e.key === 'Enter') syncSpeed(e.target.value); });
+
+        document.getElementById('lp-turnspeed-slider')?.addEventListener('input',  e => syncTurn(e.target.value));
+        document.getElementById('lp-turnspeed-num')?.addEventListener('input',     e => syncTurn(e.target.value));
+        document.getElementById('lp-turnspeed-num')?.addEventListener('keydown',   e => { if (e.key === 'Enter') syncTurn(e.target.value); });
+
+        // Preset buttons
+        document.querySelectorAll('.lp-preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                syncSpeed(btn.dataset.speed);
+                syncTurn(btn.dataset.turn);
+            });
         });
     }
 
