@@ -24,11 +24,13 @@ export class ModelImporter {
         this._dragStartPosition = null;
         this._lastMX = 0;
         this._lastMY = 0;
+        this._dragDirty = false;
 
         this.onLoad = null;
         this.onError = null;
         this.onProgress = null;
         this.onGeometryReady = null;
+        this.onRegistryChange = null;
     }
 
     async init() {
@@ -47,8 +49,10 @@ export class ModelImporter {
         return true;
     }
 
-    syncCamera(mainCam) {
+    syncCamera(mainCam, visibleIds = null) {
         if (!this._ready || !this.renderer || !this._visible) return;
+
+        if (visibleIds) this.applyCullingResults(visibleIds);
 
         if (this._pendingFocus) {
             this._focusMainCamera(mainCam, this._pendingFocus);
@@ -71,7 +75,8 @@ export class ModelImporter {
 
     shouldHandlePointer(event) {
         if (!this._ready || !this._visible || this._isUIPointer(event)) return false;
-        return !!this.selectedId || !!this._pickEntry(event);
+        const selected = this.objects.find(item => item.id === this.selectedId);
+        return !!(selected && selected.cullingVisible !== false) || !!this._pickEntry(event);
     }
 
     async loadFile(file) {
@@ -146,6 +151,7 @@ export class ModelImporter {
         entry.root.scale.copy(source.root.scale);
         this.scene.add(entry.root);
         this.objects.push(entry);
+        this._updateBounds(entry);
         this._playAnimations(entry);
         this.select(entry.id);
         this._visible = true;
@@ -189,11 +195,37 @@ export class ModelImporter {
             this._validScale(z)
         );
         selected.root.updateMatrixWorld(true);
+        this._updateBounds(selected);
+        this._notifyRegistryChange('transform', selected);
         console.info('[ModelImporter] Scale updated:', this._debugEntry(selected));
     }
 
     select(id) {
-        this.selectedId = this.objects.some(item => item.id === id) ? id : null;
+        const nextId = this.objects.some(item => item.id === id) ? id : null;
+        if (this.selectedId === nextId) return;
+        this.selectedId = nextId;
+        this._notifyRegistryChange('select', this.objects.find(item => item.id === nextId) || null);
+    }
+
+    getObjectRegistry() {
+        return this.objects.map(entry => this._serializeEntry(entry));
+    }
+
+    getCullingObjects() {
+        if (!this._ready) return [];
+        return this.objects
+            .map(entry => this._makeCullingObject(entry))
+            .filter(Boolean);
+    }
+
+    applyCullingResults(visibleIds = null) {
+        if (!this._ready) return;
+        const visibleSet = visibleIds instanceof Set ? visibleIds : new Set(visibleIds || []);
+        for (const entry of this.objects) {
+            const visible = visibleSet.has(entry.id);
+            entry.cullingVisible = visible;
+            entry.root.visible = visible;
+        }
     }
 
     extractGeometry() {
@@ -205,7 +237,7 @@ export class ModelImporter {
 
         this._canvas = document.createElement('canvas');
         this._canvas.id = 'importer-canvas';
-        this._canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:10;display:none;';
+        this._canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2;display:none;';
         document.body.appendChild(this._canvas);
 
         this.scene = new THREE.Scene();
@@ -258,10 +290,18 @@ export class ModelImporter {
         }, true);
 
         document.addEventListener('mouseup', () => {
+            if (this._dragDirty && this.selectedId) {
+                const entry = this.objects.find(item => item.id === this.selectedId);
+                if (entry) {
+                    this._updateBounds(entry);
+                    this._notifyRegistryChange('transform', entry);
+                }
+            }
             this._dragging = false;
             this._dragPlane = null;
             this._dragStartPoint = null;
             this._dragStartPosition = null;
+            this._dragDirty = false;
         });
 
         document.addEventListener('mousemove', event => {
@@ -286,6 +326,8 @@ export class ModelImporter {
             }
 
             entry.root.updateMatrixWorld(true);
+            this._updateBounds(entry);
+            this._dragDirty = true;
             event.preventDefault();
         });
     }
@@ -367,6 +409,7 @@ export class ModelImporter {
 
         this.scene.add(entry.root);
         this.objects.push(entry);
+        this._updateBounds(entry);
         this._playAnimations(entry);
         this.select(entry.id);
         this._pendingFocus = entry;
@@ -379,9 +422,10 @@ export class ModelImporter {
 
     _createEntry(asset, options) {
         const root = new this.THREE.Group();
-        const id = `model-${this._idSeq++}`;
+        const id = `import-${this._idSeq++}`;
+        const name = this._uniqueName(options.name || `Object_${this._idSeq - 1}`);
 
-        root.name = options.name;
+        root.name = name;
         root.userData.importId = id;
         asset.userData.importId = id;
         root.add(asset);
@@ -389,11 +433,13 @@ export class ModelImporter {
         return {
             id,
             sourceId: options.sourceId || id,
-            name: options.name,
+            name,
             type: options.type || 'MODEL',
             meta: options.meta || '',
             autoScale: options.autoScale || 1,
             size: options.size || new this.THREE.Vector3(1, 1, 1),
+            bounds: null,
+            cullingVisible: true,
             root,
             asset,
         };
@@ -538,7 +584,107 @@ export class ModelImporter {
         this._mixers.delete(entry.id);
         this.objects = this.objects.filter(item => item.id !== entry.id);
         if (this.selectedId === entry.id) this.selectedId = this.objects.at(-1)?.id || null;
+        this._notifyRegistryChange('remove', entry);
         console.info('[ModelImporter] Object removed:', entry.name);
+    }
+
+    _notifyRegistryChange(type = 'change', entry = null) {
+        this.onRegistryChange?.(this.getObjectRegistry(), {
+            type,
+            entry: entry
+                ? (type === 'remove' ? { id: entry.id, name: entry.name || entry.id, type: entry.type || 'MODEL' } : this._serializeEntry(entry))
+                : null,
+            selectedId: this.selectedId,
+        });
+    }
+
+    _serializeEntry(entry) {
+        const bounds = this._updateBounds(entry);
+        return {
+            id: entry.id,
+            sourceId: entry.sourceId,
+            name: entry.name || entry.id,
+            type: entry.type || 'MODEL',
+            meta: entry.meta || '',
+            position: entry.root.position.toArray(),
+            rotation: [entry.root.rotation.x, entry.root.rotation.y, entry.root.rotation.z],
+            scale: entry.root.scale.toArray(),
+            size: entry.size?.toArray?.() || [1, 1, 1],
+            bounds: bounds ? {
+                center: bounds.center,
+                halfSize: bounds.halfSize,
+                radius: bounds.radius,
+                min: bounds.min,
+                max: bounds.max,
+            } : null,
+            visible: entry.cullingVisible !== false,
+            selected: entry.id === this.selectedId,
+        };
+    }
+
+    _makeCullingObject(entry) {
+        const bounds = this._updateBounds(entry);
+        if (!bounds) return null;
+        return {
+            id: entry.id,
+            name: entry.name || entry.id,
+            source: 'imported',
+            cullingSource: 'imported',
+            category: entry.type || 'Imported',
+            groupId: entry.sourceId || entry.id,
+            pos: bounds.center,
+            radius: bounds.radius,
+            scaleVec: bounds.halfSize,
+            bounds,
+            entry,
+        };
+    }
+
+    _updateBounds(entry) {
+        if (!entry?.root || !this.THREE) return null;
+
+        const wasVisible = entry.root.visible;
+        entry.root.visible = true;
+        entry.root.updateMatrixWorld(true);
+
+        const box = new this.THREE.Box3().setFromObject(entry.root);
+        entry.root.visible = wasVisible;
+
+        const center = new this.THREE.Vector3();
+        const size = new this.THREE.Vector3();
+        if (box.isEmpty()) {
+            center.copy(entry.root.position);
+            size.set(
+                Math.max(entry.size?.x || 1, 1),
+                Math.max(entry.size?.y || 1, 1),
+                Math.max(entry.size?.z || 1, 1)
+            );
+        } else {
+            box.getCenter(center);
+            box.getSize(size);
+        }
+
+        const halfSize = [
+            Math.max(size.x * 0.5, 0.05),
+            Math.max(size.y * 0.5, 0.05),
+            Math.max(size.z * 0.5, 0.05),
+        ];
+        const radius = Math.max(Math.hypot(halfSize[0], halfSize[1], halfSize[2]), 0.1);
+        const min = box.isEmpty()
+            ? [center.x - halfSize[0], center.y - halfSize[1], center.z - halfSize[2]]
+            : box.min.toArray();
+        const max = box.isEmpty()
+            ? [center.x + halfSize[0], center.y + halfSize[1], center.z + halfSize[2]]
+            : box.max.toArray();
+
+        entry.bounds = {
+            center: center.toArray(),
+            halfSize,
+            radius,
+            min,
+            max,
+        };
+        return entry.bounds;
     }
 
     _pickEntry(event) {

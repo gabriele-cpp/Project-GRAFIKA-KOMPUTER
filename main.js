@@ -10,10 +10,11 @@ import { LOD }              from './culling/lod.js';         // [BARU]
 import { OcclusionCuller }  from './culling/occlusion.js';   // [BARU]
 
 import { generateObjects, generateClustered } from './objects/objects.js'; // [BARU]
+import { generateEnvironmentScene }          from './objects/scene-generator.js';
 import { PerformanceMonitor }               from './engine/performance.js'; // [BARU]
 import { ChartPanel }                       from './ui/chart-panel.js';     // [BARU]
 import { LeftPanel }                        from './ui/left-panel.js';      // [BARU — Fitur 1-6]
-import { createGeometry, GeometryMesh, GEOMETRY_TYPES }  from './engine/geometry.js';
+import { createGeometry, GEOMETRY_TYPES }  from './engine/geometry.js';
 import { ModelImporter }                    from './engine/model-importer.js'; // [BARU] right panel loader
 import { ImportPanel }                      from './ui/import-panel.js';       // [BARU] right sidebar
 
@@ -21,19 +22,30 @@ import { ImportPanel }                      from './ui/import-panel.js';       /
 const vertexShaderCode = `
     attribute vec4 aVertexPosition;
     attribute vec3 aVertexNormal;
-
     uniform vec4 uOffset;
     uniform float uScale;           // [BARU] LOD scale
+    uniform vec3 uScaleVec;         // per-object non-uniform scale
+    uniform float uRotationY;       // per-object yaw
     uniform mat4 uViewMatrix;
     uniform mat4 uProjectionMatrix;
     varying vec3 vNormal;
 
     void main() {
-        // [BARU] terapkan LOD scale ke setiap vertex
-        vec4 scaledPos = vec4(aVertexPosition.xyz * uScale, 1.0);
-        vec4 finalPosition = scaledPos + uOffset;
+        vec3 scaled = aVertexPosition.xyz * uScaleVec * uScale;
+        float c = cos(uRotationY);
+        float s = sin(uRotationY);
+        vec3 rotated = vec3(
+            scaled.x * c - scaled.z * s,
+            scaled.y,
+            scaled.x * s + scaled.z * c
+        );
+        vec4 finalPosition = vec4(rotated, 1.0) + uOffset;
         gl_Position = uProjectionMatrix * uViewMatrix * finalPosition;
-        vNormal = aVertexNormal;
+        vNormal = vec3(
+            aVertexNormal.x * c - aVertexNormal.z * s,
+            aVertexNormal.y,
+            aVertexNormal.x * s + aVertexNormal.z * c
+        );
     }
 `;
 
@@ -49,8 +61,9 @@ const fragmentShaderCode = `
         vec3 lightDir = normalize(uLightDirection);
         float diffuse = max(dot(normal, lightDir), 0.0);
 
-        vec3 baseNeon  = uBaseColor * 0.9;
-        vec3 highlight = uBaseColor * diffuse * 0.6;
+        vec3 baseColor = uBaseColor;
+        vec3 baseNeon  = baseColor * 0.9;
+        vec3 highlight = baseColor * diffuse * 0.6;
         vec3 finalColor = baseNeon + highlight;
 
         // [BARU] Debug mode: warnai berdasarkan LOD level
@@ -69,10 +82,11 @@ const bbVertexCode = `
     attribute vec4 aVertexPosition;
     uniform vec4 uOffset;
     uniform float uScale;
+    uniform vec3 uScaleVec;
     uniform mat4 uViewMatrix;
     uniform mat4 uProjectionMatrix;
     void main() {
-        vec4 scaledPos = vec4(aVertexPosition.xyz * uScale, 1.0);
+        vec4 scaledPos = vec4(aVertexPosition.xyz * uScale * uScaleVec, 1.0);
         gl_Position = uProjectionMatrix * uViewMatrix * (scaledPos + uOffset);
     }
 `;
@@ -129,6 +143,8 @@ const viewLoc      = gl.getUniformLocation(shader.program, 'uViewMatrix');
 const projLoc      = gl.getUniformLocation(shader.program, 'uProjectionMatrix');
 const offsetLoc    = gl.getUniformLocation(shader.program, 'uOffset');
 const scaleLoc     = gl.getUniformLocation(shader.program, 'uScale');
+const scaleVecLoc  = gl.getUniformLocation(shader.program, 'uScaleVec');
+const rotationYLoc = gl.getUniformLocation(shader.program, 'uRotationY');
 const lightDirLoc  = gl.getUniformLocation(shader.program, 'uLightDirection');
 const baseColorLoc = gl.getUniformLocation(shader.program, 'uBaseColor');
 const lodLevelLoc  = gl.getUniformLocation(shader.program, 'uLodLevel');
@@ -138,6 +154,7 @@ const bbViewLoc  = gl.getUniformLocation(bbShader.program, 'uViewMatrix');
 const bbProjLoc  = gl.getUniformLocation(bbShader.program, 'uProjectionMatrix');
 const bbOffsetLoc= gl.getUniformLocation(bbShader.program, 'uOffset');
 const bbScaleLoc = gl.getUniformLocation(bbShader.program, 'uScale');
+const bbScaleVecLoc = gl.getUniformLocation(bbShader.program, 'uScaleVec');
 const bbColorLoc = gl.getUniformLocation(bbShader.program, 'uBBoxColor');
 
 const lightDirection = [0.8, 1.0, 0.5];
@@ -153,6 +170,15 @@ const leftPanel   = new LeftPanel();
 let activeMesh = new Mesh(gl); 
 let currentGeoType = 'cube';
 let _savedCubeData = []; // Simpan cubeData saat type = 'none', restore saat ganti ke type lain
+const meshCache = new Map([['cube', activeMesh]]);
+
+function getMeshForType(type = 'cube') {
+    const meshType = GEOMETRY_TYPES.includes(type) ? type : 'cube';
+    if (!meshCache.has(meshType)) {
+        meshCache.set(meshType, meshType === 'cube' ? new Mesh(gl) : createGeometry(gl, meshType));
+    }
+    return meshCache.get(meshType);
+}
 
 function setGeometryType(type) {
     const prevType = currentGeoType;
@@ -165,11 +191,13 @@ function setGeometryType(type) {
         }
         cubeData = [];
         octree.rebuild(cubeData);
+        registerGeneratedObjects(cubeData);
+        syncSceneUI();
     } else {
         if (type === 'cube') {
-            activeMesh = new Mesh(gl); // pakai Mesh asli untuk cube
+            activeMesh = getMeshForType('cube'); // pakai Mesh asli untuk cube
         } else {
-            activeMesh = createGeometry(gl, type);
+            activeMesh = getMeshForType(type);
         }
         // Jika sebelumnya none, restore data yang tersimpan
         if (prevType === 'none' && _savedCubeData.length > 0) {
@@ -177,6 +205,8 @@ function setGeometryType(type) {
             _savedCubeData = [];
             octree.rebuild(cubeData);
         }
+        registerGeneratedObjects(cubeData);
+        syncSceneUI();
     }
 }
 
@@ -193,6 +223,18 @@ modelImporter.onLoad = (filename, meta, autoScale) => {
 modelImporter.onError    = (msg) => { showToast(`Error: ${msg}`); };
 modelImporter.onProgress = (pct) => { importPanel.setProgress(pct); };
 modelImporter.onGeometryReady = () => {}; // Three.js handles rendering directly
+modelImporter.onRegistryChange = (objects, event) => {
+    syncImportedRegistry(objects, event?.selectedId ?? null);
+    syncSceneUI();
+    console.info('[ImportPipeline] Register -> Update UI', {
+        action: event?.type || 'change',
+        importedObjects: objects.length,
+        totalSceneObjects: getSceneObjectCount(),
+        selectedId: event?.selectedId || null,
+        cullingRegistered: true,
+        hasBounds: objects.every(object => !!object.bounds && object.bounds.radius > 0),
+    });
+};
 
 // EXPORT JSON HELPER 
 function downloadJSON(data) {
@@ -212,7 +254,9 @@ function exportPerformanceJSON() {
         gpuFrameTime:    snap.gpuFrameMs,
         heapMemoryMB:    snap.heapMB,
         drawCalls:       snap.drawCalls,
-        totalObjects:    cubeData.length,
+        totalObjects:    getSceneObjectCount(),
+        generatedObjects: sceneRegistry.generated.size,
+        importedObjects:  sceneRegistry.imported.size,
         renderedObjects: snap.rendered,
         culledObjects:   snap.culledTotal,
         cullingEfficiency: snap.cullEff + '%',
@@ -225,6 +269,10 @@ function exportPerformanceJSON() {
         },
         geometryType: currentGeoType,
         sceneMode:    state.mode,
+        environmentPreset: state.environmentPreset,
+        environmentLabel:  state.environmentLabel,
+        environmentGroups: state.environmentGroups,
+        environmentStyle:  state.environmentStyle,
     };
     downloadJSON(data);
     showToast('Performance data berhasil diekspor sebagai JSON.');
@@ -242,14 +290,120 @@ const state = {
     objectCount:    500,
     mode:           'random', // 'random' | 'clustered'
     paletteIdx:     0,
+    environmentPreset: 'rice_field',
+    environmentCount: 500,
+    environmentStyle: 'minecraft',
+    environmentBlockSize: 1,
+    environmentDensitySimplification: 1,
+    environmentLabel: 'Random',
+    environmentGroups: {},
 };
 
 // GENERATE OBJECTS & BUILD OCTREE 
 let cubeData = [];
 let octreeCandidates = []; // Hasil query frustum via octree
+const sceneRegistry = {
+    generated: new Map(),
+    imported: new Map(),
+    importedSelectedId: null,
+};
+
+function registerGeneratedObjects(objects) {
+    sceneRegistry.generated.clear();
+    objects.forEach((object, index) => {
+        if (!object.id) object.id = `generated-${index + 1}`;
+        if (!object.name) object.name = `Object_${index + 1}`;
+        object.source = 'generated';
+        object.cullingSource = 'generated';
+        object.bounds = getGeneratedBounds(object);
+        sceneRegistry.generated.set(object.id, {
+            id: object.id,
+            name: object.name,
+            type: object.category || object.geometry || currentGeoType,
+            groupId: object.groupId || 'generated',
+            geometry: object.geometry || currentGeoType,
+            instancedKey: object.instancedKey || object.geometry || currentGeoType,
+            position: object.pos,
+            scale: object.scaleVec || [object.scale || 1, object.scale || 1, object.scale || 1],
+            source: 'generated',
+            ref: object,
+        });
+    });
+}
+
+function syncImportedRegistry(objects = [], selectedId = null) {
+    sceneRegistry.imported.clear();
+    objects.forEach(object => {
+        sceneRegistry.imported.set(object.id, {
+            ...object,
+            source: 'imported',
+        });
+    });
+    sceneRegistry.importedSelectedId = selectedId;
+}
+
+function getSceneObjectCount() {
+    return sceneRegistry.generated.size + sceneRegistry.imported.size;
+}
+
+function getGeneratedBounds(object) {
+    const scaleVec = object.scaleVec || [object.scale || 1, object.scale || 1, object.scale || 1];
+    const halfSize = scaleVec.map(value => Math.max(Math.abs(value), 0.05));
+    const radius = Math.max(object.radius || Math.hypot(halfSize[0], halfSize[1], halfSize[2]), 0.1);
+    return {
+        center: object.pos,
+        halfSize,
+        radius,
+        min: [
+            object.pos[0] - halfSize[0],
+            object.pos[1] - halfSize[1],
+            object.pos[2] - halfSize[2],
+        ],
+        max: [
+            object.pos[0] + halfSize[0],
+            object.pos[1] + halfSize[1],
+            object.pos[2] + halfSize[2],
+        ],
+    };
+}
+
+function isGeneratedObject(object) {
+    return (object.cullingSource || object.source) !== 'imported';
+}
+
+function isInFrustum(object) {
+    const bounds = object.bounds || getGeneratedBounds(object);
+    return frustum.containsSphere(
+        bounds.center[0],
+        bounds.center[1],
+        bounds.center[2],
+        bounds.radius
+    );
+}
+
+function makeCullingState(objects) {
+    const stateMap = new Map();
+    for (const object of objects) {
+        stateMap.set(object.id, {
+            object,
+            visible: false,
+            reason: 'frustum',
+        });
+    }
+    return stateMap;
+}
+
+function syncSceneUI() {
+    const total = getSceneObjectCount();
+    updateUI_ObjectCount(total);
+    importPanel.setObjectRegistry?.([...sceneRegistry.imported.values()], sceneRegistry.importedSelectedId);
+    leftPanel.updateSceneSummary?.(state.environmentLabel, state.environmentGroups, sceneRegistry.generated.size);
+}
 
 function regenerateObjects() {
     const count = state.objectCount;
+    state.environmentLabel = state.mode === 'clustered' ? 'Clustered' : 'Random';
+    state.environmentGroups = {};
     if (currentGeoType === 'none') {
         // Jika type none, simpan data tapi cubeData tetap kosong
         if (state.mode === 'clustered') {
@@ -268,7 +422,49 @@ function regenerateObjects() {
     }
     // Rebuild octree dengan semua objek baru
     octree.rebuild(cubeData);
-    updateUI_ObjectCount(count);
+    registerGeneratedObjects(cubeData);
+    syncSceneUI();
+}
+
+function generateEnvironment() {
+    const scene = generateEnvironmentScene(state.environmentPreset, state.environmentCount, {
+        style: 'minecraft',
+        blockSize: state.environmentBlockSize,
+        densitySimplification: state.environmentDensitySimplification,
+    });
+    cubeData = scene.objects;
+    _savedCubeData = [];
+    state.objectCount = cubeData.length;
+    state.environmentLabel = scene.label;
+    state.environmentGroups = scene.groups;
+    currentGeoType = 'environment';
+    activeMesh = getMeshForType('cube');
+    octree.rebuild(cubeData);
+    registerGeneratedObjects(cubeData);
+    syncSceneUI();
+    leftPanel.syncObjCount?.(state.objectCount);
+    leftPanel.updateSceneSummary?.(state.environmentLabel, state.environmentGroups, cubeData.length);
+    console.info('[SceneGenerator] Generated environment scene', {
+        preset: scene.preset,
+        style: scene.style,
+        totalObjects: cubeData.length,
+        groups: scene.groups,
+    });
+    showToast(`${scene.label} scene generated: ${cubeData.length.toLocaleString()} objects.`);
+}
+
+function clearGeneratedScene() {
+    cubeData = [];
+    _savedCubeData = [];
+    state.objectCount = 0;
+    state.environmentLabel = 'Empty';
+    state.environmentGroups = {};
+    octree.rebuild(cubeData);
+    registerGeneratedObjects(cubeData);
+    syncSceneUI();
+    leftPanel.syncObjCount?.(state.objectCount);
+    leftPanel.updateSceneSummary?.('Empty', {}, 0);
+    showToast('Generated scene cleared. Imported objects tetap dipertahankan.');
 }
 
 regenerateObjects(); // Initial population
@@ -324,13 +520,14 @@ function updateCameraMovement() {
     camera.updateViewMatrix();
 }
 
-// DRAW BOUNDING BOX (wire frame) 
-function drawBBox(pos, scale, color) {
+// DRAW BOUNDING BOX (wire frame)
+function drawBBox(pos, scale, color, scaleVec = [1, 1, 1]) {
     bbShader.use();
     gl.uniformMatrix4fv(bbViewLoc, false, camera.viewMatrix);
     gl.uniformMatrix4fv(bbProjLoc, false, camera.projectionMatrix);
     gl.uniform4f(bbOffsetLoc, pos[0], pos[1], pos[2], 0);
     gl.uniform1f(bbScaleLoc, scale * 1.05); // sedikit lebih besar dari objek
+    gl.uniform3fv(bbScaleVecLoc, scaleVec);
     gl.uniform3fv(bbColorLoc, color);
 
     const posLoc = gl.getAttribLocation(bbShader.program, 'aVertexPosition');
@@ -339,6 +536,19 @@ function drawBBox(pos, scale, color) {
     gl.enableVertexAttribArray(posLoc);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bbox.ib);
     gl.drawElements(gl.LINES, bbox.count, gl.UNSIGNED_SHORT, 0);
+}
+
+function drawCullingDebug(cullingState) {
+    if (!state.showBBox) return;
+
+    let drawn = 0;
+    for (const { object, visible } of cullingState.values()) {
+        if (drawn >= 700) break;
+        const bounds = object.bounds || getGeneratedBounds(object);
+        const color = visible ? [0.0, 1.0, 0.2] : [1.0, 0.12, 0.08];
+        drawBBox(bounds.center, 1, color, bounds.halfSize);
+        drawn++;
+    }
 }
 
 // FPS & STATS
@@ -364,22 +574,26 @@ function gameLoop() {
 
     // HYBRID SPATIAL-OCCLUSION CULLING PIPELINE 
 
-    let candidates = cubeData; // Default: semua objek
+    const importedCullingObjects = modelImporter.getCullingObjects?.() || [];
+    const sceneCullingObjects = cubeData.concat(importedCullingObjects);
+    const cullingState = makeCullingState(sceneCullingObjects);
+    let candidates = sceneCullingObjects; // Default: semua objek aktif
 
     // STEP 1: Spatial pruning via Octree (O(log n) vs O(n))
     if (state.useOctree && state.useFrustum) {
         octree.queryFrustum(frustum, octreeCandidates);
-        candidates = octreeCandidates;
+        candidates = octreeCandidates.filter(isInFrustum).concat(importedCullingObjects.filter(isInFrustum));
     } else if (state.useFrustum && !state.useOctree) {
         // Frustum culling manual (seperti kode asli)
-        candidates = cubeData.filter(d => frustum.containsSphere(d.pos[0], d.pos[1], d.pos[2], 1.73));
+        candidates = sceneCullingObjects.filter(isInFrustum);
     }
 
     // STEP 2: Per-candidate LOD + Occlusion test
     let drawnObjects = 0;
-    let culledFrustum  = cubeData.length - candidates.length;
+    let culledFrustum  = sceneCullingObjects.length - candidates.length;
     let culledOcclusion = 0;
     let culledLOD       = 0;
+    const visibleImportedIds = new Set();
 
     // Untuk occlusion: kumpulkan occluder (objek terdekat yang sudah dirender)
     const occluders = [];
@@ -402,6 +616,7 @@ function gameLoop() {
         // STEP 2a: Occlusion culling [BARU]
         occlusion.enabled = state.useOcclusion;
         if (!occlusion.shouldRender(data.pos, dist, camera.position, camera.forward, occluders)) {
+            cullingState.get(data.id).reason = 'occlusion';
             culledOcclusion++;
             continue;
         }
@@ -410,44 +625,64 @@ function gameLoop() {
         lod.enabled = state.useLOD;
         const lodResult = lod.getLevel(dist);
         if (!lodResult.shouldRender) {
+            cullingState.get(data.id).reason = 'lod';
             culledLOD++;
+            continue;
+        }
+
+        const objectState = cullingState.get(data.id);
+        if (objectState) {
+            objectState.visible = true;
+            objectState.reason = 'visible';
+        }
+
+        const bounds = data.bounds || getGeneratedBounds(data);
+        const isImported = !isGeneratedObject(data);
+        if (isImported) {
+            visibleImportedIds.add(data.id);
+            drawnObjects++;
+
+            if (state.useOcclusion && data.category !== 'Terrain' && (dist < 80 || bounds.radius > 6) && occluders.length < 60) {
+                occluders.push({ pos: bounds.center, dist, radius: Math.max(8, Math.min(35, bounds.radius || 8)) });
+            }
             continue;
         }
 
         // STEP 3: RENDER (sama seperti kode asli, + scale & lodLevel uniform)
         // Skip jika type = 'none' (activeMesh null) — cubeData sudah dikosongkan, loop ini tidak akan dicapai
-        if (!activeMesh) { continue; }
+        const mesh = data.geometry ? getMeshForType(data.geometry) : activeMesh;
+        if (!mesh) { continue; }
+        const scaleVec = data.scaleVec || [data.scale || 1, data.scale || 1, data.scale || 1];
 
         shader.use();
         gl.uniform4f(offsetLoc,  data.pos[0], data.pos[1], data.pos[2], 0.0);
         gl.uniform3f(baseColorLoc, data.color[0], data.color[1], data.color[2]);
-        gl.uniform1f(scaleLoc, data.scale * lodResult.scale);    // [BARU]
+        gl.uniform1f(scaleLoc, lodResult.scale);    // [BARU]
+        gl.uniform3fv(scaleVecLoc, scaleVec);
+        gl.uniform1f(rotationYLoc, data.rotationY || 0);
         gl.uniform1f(lodLevelLoc, state.showLODColor ? lodResult.level : 0); // [BARU]
 
-        activeMesh.draw(shader.program);  // pakai activeMesh (bisa ganti geometri)
+        mesh.draw(shader.program);  // pakai activeMesh atau geometry per object
         perfMonitor.countDrawCall(); 
         drawnObjects++;
 
         // Tambahkan ke occluder list (hanya objek dekat saja)
-        if (state.useOcclusion && dist < 50 && occluders.length < 30) {
-            occluders.push({ pos: data.pos, dist });
-        }
-
-        // Render bounding box jika debug mode aktif
-        if (state.showBBox && drawnObjects <= 500) { // limit 500 agar tidak lambat
-            const bboxColor = lodResult.level === 0 ? [0,1,0] :
-                              lodResult.level === 1 ? [1,1,0] : [1,0.3,0];
-            drawBBox(data.pos, data.scale * lodResult.scale, bboxColor);
+        if (state.useOcclusion && data.category !== 'Terrain' && (dist < 80 || bounds.radius > 6) && occluders.length < 60) {
+            occluders.push({ pos: bounds.center, dist, radius: Math.max(8, Math.min(35, bounds.radius || 8)) });
         }
     }
 
+    drawCullingDebug(cullingState);
+
     // FPS COUNTER 
-    const totalCulled = cubeData.length - drawnObjects;
-    perfMonitor.endFrame(drawnObjects, totalCulled, cubeData.length);
+    const totalDrawnObjects = drawnObjects;
+    const totalSceneObjects = getSceneObjectCount();
+    const totalCulled = Math.max(0, totalSceneObjects - totalDrawnObjects);
 
     // ── RENDER IMPORTED INSTANCES ──
     // Sync kamera Three.js dengan kamera WebGL setiap frame, lalu render overlay.
-    modelImporter.syncCamera(camera);
+    modelImporter.syncCamera(camera, visibleImportedIds);
+    perfMonitor.endFrame(totalDrawnObjects, totalCulled, totalSceneObjects);
 
 
     frameCount++;
@@ -456,9 +691,9 @@ function gameLoop() {
         currentFPS = Math.round(frameCount / ((now - lastTime) / 1000));
         frameCount = 0;
         lastTime   = now;
-        updateStatsPanel(drawnObjects, culledFrustum, culledOcclusion, culledLOD);
+        updateStatsPanel(totalDrawnObjects, culledFrustum, culledOcclusion, culledLOD);
         chartPanel.update(perfMonitor, state);
-        leftPanel.updatePerf(perfMonitor.snapshot, camera, drawnObjects, cubeData.length - drawnObjects, cubeData.length);
+        leftPanel.updatePerf(perfMonitor.snapshot, camera, totalDrawnObjects, totalCulled, totalSceneObjects);
     }
 
     requestAnimationFrame(gameLoop);
@@ -468,8 +703,8 @@ requestAnimationFrame(gameLoop);
 
 // UI PANEL  — Modern floating control panel
 function updateStatsPanel(drawn, culledF, culledO, culledL) {
-    const total   = cubeData.length;
-    const culled  = total - drawn;
+    const total   = getSceneObjectCount();
+    const culled  = Math.max(0, total - drawn);
     const efficiency = total > 0 ? Math.round((culled / total) * 100) : 0;
 
     document.getElementById('stat-fps').textContent     = currentFPS;
@@ -553,6 +788,13 @@ window.addEventListener('DOMContentLoaded', () => {
         onMode:    (mode)  => { state.mode = mode; },
         onPalette: (idx)   => { state.paletteIdx = idx; },
         onGenerate: ()     => { regenerateObjects(); },
+        onEnvironmentPreset: (preset) => { state.environmentPreset = preset; },
+        onEnvironmentCount:  (count)  => { state.environmentCount = count; },
+        onEnvironmentStyle:  (style)  => { state.environmentStyle = style; },
+        onEnvironmentBlockSize: (value) => { state.environmentBlockSize = value; },
+        onEnvironmentDensitySimplification: (value) => { state.environmentDensitySimplification = value; },
+        onGenerateEnvironment: () => { generateEnvironment(); },
+        onClearGeneratedScene: () => { clearGeneratedScene(); },
 
         // Culling toggles from left panel
         onStateChange: (key, val) => {
@@ -586,14 +828,23 @@ window.addEventListener('DOMContentLoaded', () => {
 
     leftPanel.syncState(state);
     leftPanel.syncObjCount(state.objectCount);
+    leftPanel.syncSceneGeneratorCount(state.environmentCount);
+    leftPanel.syncEnvironmentStyleOptions({
+        style: state.environmentStyle,
+        blockSize: state.environmentBlockSize,
+        densitySimplification: state.environmentDensitySimplification,
+    });
+    leftPanel.updateSceneSummary(state.environmentLabel, state.environmentGroups, cubeData.length);
 
     // Mount Import Panel (right sidebar)
     importPanel.mount({
         onUpload: (files) => {
+            console.info('[ImportPipeline] Import -> Load', files.map(file => file.name));
             modelImporter.loadFiles(files);
         },
         onRemove: () => {
             modelImporter.remove();
+            if (modelImporter.objects.length === 0) importPanel.reset();
             showToast('Model dihapus dari scene.');
         },
         onInstanceCount: (n) => {
@@ -602,8 +853,22 @@ window.addEventListener('DOMContentLoaded', () => {
         onScale: ({ x, y, z }) => {
             modelImporter.setScale(x, y, z);
         },
+        onSelectObject: (id) => {
+            modelImporter.select(id);
+        },
+        onDuplicateObject: async (id) => {
+            const newId = await modelImporter.duplicate(id);
+            if (newId) showToast('Object berhasil diduplikasi.');
+        },
+        onRemoveObject: (id) => {
+            modelImporter.remove(id);
+            if (modelImporter.objects.length === 0) importPanel.reset();
+            showToast('Object dihapus dari scene.');
+        },
         onError: (msg) => { showToast(msg); },
     });
+
+    syncSceneUI();
 
     // Exclude import panel from camera drag
     document.addEventListener('mousedown', e => {

@@ -54,10 +54,11 @@ export class OcclusionCuller {
             const dy = objPos[1] - occ.pos[1];
             const dz = objPos[2] - occ.pos[2];
             const distToOccluder = Math.hypot(dx, dy, dz);
+            const radius = occ.radius || occludeRadius;
 
             // Jika objek sangat dekat dengan occluder DAN occluder lebih dekat ke kamera
             // → anggap objek ini tersembunyi
-            if (distToOccluder < occludeRadius) {
+            if (distToOccluder < radius) {
                 return false;
             }
         }

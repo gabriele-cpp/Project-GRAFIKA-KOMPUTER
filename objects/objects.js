@@ -34,7 +34,8 @@ export function generateObjects(count, worldSize = 500, paletteIdx = 0) {
         const baseScale = 0.5 + Math.random() * 2.0;
 
         objects.push({
-            id:    i,
+            id:    `generated-${i + 1}`,
+            name:  `Object_${i + 1}`,
             pos:   [
                 (Math.random() - 0.5) * worldSize * 2,
                 (Math.random() - 0.5) * worldSize * 2,
@@ -69,7 +70,8 @@ export function generateClustered(count, worldSize = 500, clusterCount = 10) {
         const spread = worldSize * 0.2;
         const color = [Math.random(), Math.random(), Math.random()];
         objects.push({
-            id:    i,
+            id:    `generated-${i + 1}`,
+            name:  `Object_${i + 1}`,
             pos:   [
                 center[0] + (Math.random() - 0.5) * spread,
                 center[1] + (Math.random() - 0.5) * spread,

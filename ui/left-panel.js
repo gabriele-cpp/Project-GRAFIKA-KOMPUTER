@@ -49,8 +49,8 @@ const PANEL_HTML = `
       <div class="lp-field">
         <label class="lp-label">Objects</label>
         <div class="lp-slider-row">
-          <input type="range" id="lp-obj-slider" min="1" max="50000" step="1" value="500">
-          <input type="number" id="lp-obj-num" class="lp-num-input" min="1" max="50000" step="1" value="500">
+          <input type="range" id="lp-obj-slider" min="0" max="50000" step="1" value="500">
+          <input type="number" id="lp-obj-num" class="lp-num-input" min="0" max="50000" step="1" value="500">
         </div>
       </div>
 
@@ -75,7 +75,67 @@ const PANEL_HTML = `
     </div>
   </section>
 
-  <!-- ════ CULLING METHODS ════ -->
+  <!-- ENVIRONMENT GENERATOR -->
+  <section class="lp-section" id="sec-scene-generator">
+    <div class="lp-sec-header" data-target="body-scene-generator">
+      <span class="lp-sec-icon">ENV</span> Environment Generator
+      <span class="lp-chevron">▾</span>
+    </div>
+    <div class="lp-sec-body open" id="body-scene-generator">
+      <div class="lp-field">
+        <label class="lp-label">Environment</label>
+        <select id="lp-env-preset">
+          <option value="rice_field">Ladang Padi</option>
+          <option value="forest">Hutan</option>
+          <option value="classroom">Ruangan Kelas</option>
+        </select>
+      </div>
+
+      <div class="lp-field">
+        <label class="lp-label">Target Objects <span id="lp-val-env-count">500</span></label>
+        <div class="lp-slider-row">
+          <input type="range" id="lp-env-count-slider" min="50" max="5000" step="50" value="500">
+          <input type="number" class="lp-num-input" id="lp-env-count-num" min="1" max="50000" step="1" value="500">
+        </div>
+      </div>
+
+      <div class="lp-field">
+        <label class="lp-label">Style</label>
+        <select id="lp-env-style">
+          <option value="minecraft">Minecraft / Blocky</option>
+        </select>
+      </div>
+
+      <div class="lp-style-options" id="lp-minecraft-options">
+        <div class="lp-field">
+          <label class="lp-label">Block Size <span id="lp-val-env-block">1.0</span></label>
+          <input type="range" id="lp-env-block-size" min="0.5" max="4" step="0.5" value="1">
+        </div>
+
+        <div class="lp-field">
+          <label class="lp-label">Density Simplification <span id="lp-val-env-density">100%</span></label>
+          <input type="range" id="lp-env-density" min="0.25" max="1" step="0.05" value="1">
+        </div>
+      </div>
+
+      <div class="lp-env-presets">
+        <button class="lp-preset-btn" data-env-count="100">100</button>
+        <button class="lp-preset-btn" data-env-count="500">500</button>
+        <button class="lp-preset-btn" data-env-count="1000">1000</button>
+        <button class="lp-preset-btn" data-env-count="2500">2500</button>
+      </div>
+
+      <button class="lp-btn lp-btn-primary" id="lp-btn-env-generate">Generate Environment</button>
+      <button class="lp-btn" id="lp-btn-env-regenerate">Regenerate</button>
+      <button class="lp-btn lp-btn-danger" id="lp-btn-env-clear">Clear Scene</button>
+
+      <div class="lp-scene-summary" id="lp-scene-summary">
+        <div class="lp-scene-summary-title">Scene: Random</div>
+        <div class="lp-scene-group-list" id="lp-scene-groups">No environment scene generated.</div>
+      </div>
+    </div>
+  </section>
+
   <section class="lp-section">
     <div class="lp-sec-header" data-target="body-culling">
       <span class="lp-sec-icon">✂</span> Culling Methods
@@ -427,6 +487,21 @@ input[type=range]::-webkit-slider-thumb {
   gap: 5px;
   margin-top: 8px;
 }
+.lp-env-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin: 8px 0 10px;
+}
+.lp-style-options {
+  display: none;
+  border: 1px solid rgba(0,200,255,0.09);
+  border-radius: 6px;
+  background: rgba(0,200,255,0.025);
+  padding: 8px 8px 0;
+  margin-bottom: 10px;
+}
+.lp-style-options.show { display: block; }
 .lp-preset-btn {
   padding: 6px 4px;
   background: rgba(0,200,255,0.05);
@@ -443,6 +518,36 @@ input[type=range]::-webkit-slider-thumb {
   background: rgba(0,200,255,0.15);
   border-color: var(--lp-accent);
   color: var(--lp-accent);
+}
+
+.lp-scene-summary {
+  margin-top: 10px;
+  border: 1px solid var(--lp-border);
+  border-radius: 6px;
+  background: rgba(0,200,255,0.035);
+  padding: 8px;
+}
+.lp-scene-summary-title {
+  font-family: var(--lp-mono);
+  font-size: 0.62rem;
+  color: var(--lp-accent);
+  margin-bottom: 6px;
+}
+.lp-scene-group-list {
+  display: grid;
+  gap: 4px;
+  font-family: var(--lp-mono);
+  font-size: 0.56rem;
+  color: var(--lp-dim);
+}
+.lp-scene-group-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lp-scene-group-row strong {
+  color: var(--lp-text);
+  font-weight: 600;
 }
 
 /* ── Buttons ── */
@@ -610,6 +715,7 @@ export class LeftPanel {
         this._bindSections();
         this._bindObjectType();
         this._bindScene();
+        this._bindSceneGenerator();
         this._bindCullingToggles();
         this._bindCameraSpeed();
         this._bindPerf();
@@ -647,6 +753,51 @@ export class LeftPanel {
         const numIn  = document.getElementById('lp-obj-num');
         if (slider) slider.value = count;
         if (numIn)  numIn.value  = count;
+    }
+
+    syncSceneGeneratorCount(count) {
+        const slider = document.getElementById('lp-env-count-slider');
+        const numIn  = document.getElementById('lp-env-count-num');
+        const label  = document.getElementById('lp-val-env-count');
+        if (slider) slider.value = Math.max(Number(slider.min), Math.min(Number(slider.max), count));
+        if (numIn)  numIn.value  = count;
+        if (label)  label.textContent = Number(count).toLocaleString();
+    }
+
+    updateSceneSummary(label = 'Random', groups = {}, total = 0) {
+        const title = document.querySelector('#lp-scene-summary .lp-scene-summary-title');
+        const list = document.getElementById('lp-scene-groups');
+        if (title) title.textContent = `Scene: ${label} | ${Number(total).toLocaleString()} objects`;
+        if (!list) return;
+        list.replaceChildren();
+        const entries = Object.entries(groups);
+        if (entries.length === 0) {
+            list.textContent = 'No environment scene generated.';
+            return;
+        }
+        entries
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([name, count]) => {
+                const row = document.createElement('div');
+                row.className = 'lp-scene-group-row';
+                const type = document.createElement('strong');
+                type.textContent = name;
+                const value = document.createElement('span');
+                value.textContent = Number(count).toLocaleString();
+                row.append(type, value);
+                list.appendChild(row);
+            });
+    }
+
+    syncEnvironmentStyleOptions(settings = {}) {
+        const style = 'minecraft';
+        const blockSize = Math.max(0.5, Math.min(4, parseFloat(settings.blockSize) || 1));
+        const density = Math.max(0.25, Math.min(1, parseFloat(settings.densitySimplification) || 1));
+        const styleSelect = document.getElementById('lp-env-style');
+        if (styleSelect) styleSelect.value = style;
+        this._setRangeLabel('lp-env-block-size', 'lp-val-env-block', blockSize, v => Number(v).toFixed(1));
+        this._setRangeLabel('lp-env-density', 'lp-val-env-density', density, v => `${Math.round(v * 100)}%`);
+        this._toggleMinecraftOptions(style);
     }
 
     // ────────────────────────────────────────────────────────
@@ -715,7 +866,7 @@ export class LeftPanel {
         let debounce = null;
 
         const applyCount = (v) => {
-            v = Math.max(1, Math.min(50000, parseInt(v) || 1));
+            v = Math.max(0, Math.min(50000, parseInt(v) || 0));
             if (slider) slider.value = v;
             if (numIn)  numIn.value  = v;
             clearTimeout(debounce);
@@ -726,9 +877,9 @@ export class LeftPanel {
         slider?.addEventListener('change', e => { clearTimeout(debounce); this.callbacks.onObjCount?.(parseInt(e.target.value)); });
 
         numIn?.addEventListener('input', e => applyCount(e.target.value));
-        numIn?.addEventListener('change', e => { clearTimeout(debounce); applyCount(e.target.value); this.callbacks.onObjCount?.(Math.max(1, parseInt(e.target.value) || 1)); });
+        numIn?.addEventListener('change', e => { clearTimeout(debounce); applyCount(e.target.value); this.callbacks.onObjCount?.(Math.max(0, parseInt(e.target.value) || 0)); });
         // Allow Enter key to apply immediately
-        numIn?.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(debounce); this.callbacks.onObjCount?.(Math.max(1, parseInt(numIn.value) || 1)); } });
+        numIn?.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(debounce); this.callbacks.onObjCount?.(Math.max(0, parseInt(numIn.value) || 0)); } });
 
         document.getElementById('lp-sel-mode')?.addEventListener('change', e =>
             this.callbacks.onMode?.(e.target.value));
@@ -736,6 +887,55 @@ export class LeftPanel {
             this.callbacks.onPalette?.(parseInt(e.target.value)));
         document.getElementById('lp-btn-generate')?.addEventListener('click', () =>
             this.callbacks.onGenerate?.());
+    }
+
+    _bindSceneGenerator() {
+        const preset = document.getElementById('lp-env-preset');
+        const slider = document.getElementById('lp-env-count-slider');
+        const numIn  = document.getElementById('lp-env-count-num');
+        const label  = document.getElementById('lp-val-env-count');
+        const styleSelect = document.getElementById('lp-env-style');
+        const blockSize = document.getElementById('lp-env-block-size');
+        const density = document.getElementById('lp-env-density');
+
+        const applyCount = (raw) => {
+            let v = Math.max(1, Math.min(50000, parseInt(raw) || 500));
+            if (slider) slider.value = Math.max(Number(slider.min), Math.min(Number(slider.max), v));
+            if (numIn) numIn.value = v;
+            if (label) label.textContent = v.toLocaleString();
+            this.callbacks.onEnvironmentCount?.(v);
+        };
+
+        preset?.addEventListener('change', e => this.callbacks.onEnvironmentPreset?.(e.target.value));
+        styleSelect?.addEventListener('change', e => {
+            const style = 'minecraft';
+            this._toggleMinecraftOptions(style);
+            this.callbacks.onEnvironmentStyle?.(style);
+        });
+        blockSize?.addEventListener('input', e => {
+            const value = Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 1));
+            this._setRangeLabel('lp-env-block-size', 'lp-val-env-block', value, v => Number(v).toFixed(1));
+            this.callbacks.onEnvironmentBlockSize?.(value);
+        });
+        density?.addEventListener('input', e => {
+            const value = Math.max(0.25, Math.min(1, parseFloat(e.target.value) || 1));
+            this._setRangeLabel('lp-env-density', 'lp-val-env-density', value, v => `${Math.round(v * 100)}%`);
+            this.callbacks.onEnvironmentDensitySimplification?.(value);
+        });
+        slider?.addEventListener('input', e => applyCount(e.target.value));
+        numIn?.addEventListener('input', e => applyCount(e.target.value));
+        numIn?.addEventListener('keydown', e => { if (e.key === 'Enter') applyCount(e.target.value); });
+
+        document.querySelectorAll('[data-env-count]').forEach(btn => {
+            btn.addEventListener('click', () => applyCount(btn.dataset.envCount));
+        });
+
+        document.getElementById('lp-btn-env-generate')?.addEventListener('click', () =>
+            this.callbacks.onGenerateEnvironment?.());
+        document.getElementById('lp-btn-env-regenerate')?.addEventListener('click', () =>
+            this.callbacks.onGenerateEnvironment?.());
+        document.getElementById('lp-btn-env-clear')?.addEventListener('click', () =>
+            this.callbacks.onClearGeneratedScene?.());
     }
 
     _bindCullingToggles() {
@@ -785,7 +985,7 @@ export class LeftPanel {
         document.getElementById('lp-turnspeed-num')?.addEventListener('keydown',   e => { if (e.key === 'Enter') syncTurn(e.target.value); });
 
         // Preset buttons
-        document.querySelectorAll('.lp-preset-btn').forEach(btn => {
+        document.querySelectorAll('.lp-speed-presets .lp-preset-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 syncSpeed(btn.dataset.speed);
                 syncTurn(btn.dataset.turn);
@@ -798,6 +998,27 @@ export class LeftPanel {
             this.callbacks.onChartPanel?.());
         document.getElementById('lp-btn-export')?.addEventListener('click', () =>
             this.callbacks.onExportJSON?.());
+    }
+
+    _toggleMinecraftOptions(style) {
+        const options = document.getElementById('lp-minecraft-options');
+        options?.classList.toggle('show', style === 'minecraft');
+    }
+
+    _setValuePair(sliderId, numId, labelId, value, fmt) {
+        const slider = document.getElementById(sliderId);
+        const num = document.getElementById(numId);
+        const label = document.getElementById(labelId);
+        if (slider) slider.value = Math.max(Number(slider.min || value), Math.min(Number(slider.max || value), value));
+        if (num) num.value = value;
+        if (label) label.textContent = fmt(value);
+    }
+
+    _setRangeLabel(sliderId, labelId, value, fmt) {
+        const slider = document.getElementById(sliderId);
+        const label = document.getElementById(labelId);
+        if (slider) slider.value = value;
+        if (label) label.textContent = fmt(value);
     }
 
     /** Sync toggle checkboxes to external state object */

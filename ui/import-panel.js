@@ -311,6 +311,93 @@ const CSS = `
 .ip-btn-danger:hover { background: rgba(255,68,85,0.18); }
 
 /* ── Divider ── */
+/* Object registry */
+.ip-registry-summary {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px;
+  font-family: var(--ip-mono);
+  font-size: 0.62rem;
+  color: var(--ip-dim);
+}
+.ip-registry-summary strong {
+  color: var(--ip-accent);
+  font-weight: 700;
+}
+.ip-object-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.ip-object-empty {
+  border: 1px dashed rgba(0,200,255,0.16);
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+  font-size: 0.62rem;
+  color: var(--ip-dim);
+}
+.ip-object-row {
+  border: 1px solid rgba(0,200,255,0.12);
+  border-radius: 6px;
+  background: rgba(0,200,255,0.035);
+  padding: 8px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ip-object-row:hover {
+  background: rgba(0,200,255,0.08);
+  border-color: rgba(0,200,255,0.28);
+}
+.ip-object-row.selected {
+  background: rgba(0,200,255,0.12);
+  border-color: var(--ip-accent);
+  box-shadow: 0 0 10px rgba(0,200,255,0.12);
+}
+.ip-object-top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+}
+.ip-object-name {
+  min-width: 0;
+  font-family: var(--ip-mono);
+  font-size: 0.66rem;
+  color: var(--ip-text);
+  word-break: break-word;
+}
+.ip-object-id {
+  font-family: var(--ip-mono);
+  font-size: 0.55rem;
+  color: var(--ip-dim);
+  margin-top: 2px;
+}
+.ip-object-actions {
+  display: flex; gap: 4px; flex-shrink: 0;
+}
+.ip-mini-btn {
+  border: 1px solid rgba(0,200,255,0.18);
+  border-radius: 4px;
+  background: rgba(0,200,255,0.06);
+  color: var(--ip-accent);
+  font-family: var(--ip-mono);
+  font-size: 0.55rem;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.ip-mini-btn:hover { background: rgba(0,200,255,0.16); }
+.ip-mini-btn.danger {
+  color: var(--ip-red);
+  border-color: rgba(255,68,85,0.24);
+  background: rgba(255,68,85,0.06);
+}
+.ip-object-meta {
+  margin-top: 5px;
+  color: var(--ip-dim);
+  font-family: var(--ip-mono);
+  font-size: 0.55rem;
+  line-height: 1.45;
+}
+
 .ip-divider {
   height: 1px;
   background: var(--ip-border);
@@ -425,6 +512,17 @@ const HTML = `
     </div>
 
   </div><!-- /ip-controls -->
+
+  <div class="ip-section">
+    <div class="ip-sec-title">Object Registry</div>
+    <div class="ip-registry-summary">
+      <span>Imported</span>
+      <strong id="ip-object-count">0 objects</strong>
+    </div>
+    <div class="ip-object-list" id="ip-object-list">
+      <div class="ip-object-empty">No imported objects registered.</div>
+    </div>
+  </div>
 </aside>
 `;
 
@@ -460,6 +558,7 @@ export class ImportPanel {
         this._bindToggle();
         this._bindUpload();
         this._bindControls();
+        this._bindRegistry();
     }
 
     // ── Public: show loading progress ──
@@ -511,6 +610,70 @@ export class ImportPanel {
 
     // ─── Private ────────────────────────────────────────────
 
+    setObjectRegistry(objects = [], selectedId = null) {
+        const countEl = document.getElementById('ip-object-count');
+        const listEl = document.getElementById('ip-object-list');
+        if (countEl) countEl.textContent = `${objects.length.toLocaleString()} object${objects.length === 1 ? '' : 's'}`;
+        if (!listEl) return;
+
+        listEl.replaceChildren();
+        if (objects.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'ip-object-empty';
+            empty.textContent = 'No imported objects registered.';
+            listEl.appendChild(empty);
+            return;
+        }
+
+        const formatVec = (vec = []) => vec
+            .slice(0, 3)
+            .map(v => Number(v || 0).toFixed(1))
+            .join(', ');
+
+        objects.forEach(object => {
+            const row = document.createElement('div');
+            row.className = 'ip-object-row' + (object.id === selectedId || object.selected ? ' selected' : '');
+            row.dataset.id = object.id;
+
+            const top = document.createElement('div');
+            top.className = 'ip-object-top';
+
+            const title = document.createElement('div');
+            title.style.minWidth = '0';
+            const name = document.createElement('div');
+            name.className = 'ip-object-name';
+            name.textContent = object.name || object.id;
+            const id = document.createElement('div');
+            id.className = 'ip-object-id';
+            id.textContent = object.id;
+            title.append(name, id);
+
+            const actions = document.createElement('div');
+            actions.className = 'ip-object-actions';
+            const duplicate = document.createElement('button');
+            duplicate.className = 'ip-mini-btn';
+            duplicate.dataset.action = 'duplicate';
+            duplicate.dataset.id = object.id;
+            duplicate.type = 'button';
+            duplicate.textContent = 'Dup';
+            const remove = document.createElement('button');
+            remove.className = 'ip-mini-btn danger';
+            remove.dataset.action = 'remove';
+            remove.dataset.id = object.id;
+            remove.type = 'button';
+            remove.textContent = 'Del';
+            actions.append(duplicate, remove);
+
+            const meta = document.createElement('div');
+            meta.className = 'ip-object-meta';
+            meta.textContent = `${object.type || 'MODEL'} | pos ${formatVec(object.position)} | scale ${formatVec(object.scale)}`;
+
+            top.append(title, actions);
+            row.append(top, meta);
+            listEl.appendChild(row);
+        });
+    }
+
     _bindToggle() {
         const btn   = document.getElementById('ip-toggle');
         const panel = document.getElementById('import-panel');
@@ -540,7 +703,6 @@ export class ImportPanel {
         });
 
         document.getElementById('ip-btn-remove')?.addEventListener('click', () => {
-            this.reset();
             this.callbacks.onRemove?.();
         });
     }
@@ -605,6 +767,23 @@ export class ImportPanel {
     }
 
     // Helper: bi-directional sync slider ↔ number input
+    _bindRegistry() {
+        const list = document.getElementById('ip-object-list');
+        list?.addEventListener('click', e => {
+            const actionBtn = e.target.closest('[data-action]');
+            if (actionBtn) {
+                e.stopPropagation();
+                const id = actionBtn.dataset.id;
+                if (actionBtn.dataset.action === 'duplicate') this.callbacks.onDuplicateObject?.(id);
+                if (actionBtn.dataset.action === 'remove') this.callbacks.onRemoveObject?.(id);
+                return;
+            }
+
+            const row = e.target.closest('.ip-object-row');
+            if (row?.dataset.id) this.callbacks.onSelectObject?.(row.dataset.id);
+        });
+    }
+
     _syncPair(sliderId, numId, labelId, onChange, min, max, step, fmt) {
         const slider = document.getElementById(sliderId);
         const num    = document.getElementById(numId);
@@ -637,7 +816,7 @@ export class ImportPanel {
     }
 
     _resetSliders() {
-        ['u','x','y','z'].forEach(a => this._setAxisValue(a === 'u' ? 'U' : a, 1.0));
+        ['u','x','y','z'].forEach(a => this._setAxisValue(a, 1.0));
         this._scaleU = this._scaleX = this._scaleY = this._scaleZ = 1.0;
         const countSlider = document.getElementById('ip-slider-count');
         const countNum    = document.getElementById('ip-num-count');
