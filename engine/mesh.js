@@ -57,6 +57,9 @@ export class Mesh {
         gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(normLoc);
 
+        const colLoc = gl.getAttribLocation(shaderProgram, 'aVertexColor');
+        if (colLoc >= 0) gl.disableVertexAttribArray(colLoc);
+
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
         gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);
     }

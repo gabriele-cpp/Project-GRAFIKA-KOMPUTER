@@ -62,6 +62,18 @@ export class GeometryMesh {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
         gl.drawElements(gl.TRIANGLES, this.indexCount, this.indexType, 0);
     }
+
+    dispose() {
+        const gl = this.gl;
+        if (this.vertexBuffer) gl.deleteBuffer(this.vertexBuffer);
+        if (this.normalBuffer) gl.deleteBuffer(this.normalBuffer);
+        if (this.colorBuffer) gl.deleteBuffer(this.colorBuffer);
+        if (this.indexBuffer) gl.deleteBuffer(this.indexBuffer);
+        this.vertexBuffer = null;
+        this.normalBuffer = null;
+        this.colorBuffer = null;
+        this.indexBuffer = null;
+    }
 }
 
 // ─────────────────────────────────────────────

@@ -75,67 +75,6 @@ const PANEL_HTML = `
     </div>
   </section>
 
-  <!-- ENVIRONMENT GENERATOR -->
-  <section class="lp-section" id="sec-scene-generator">
-    <div class="lp-sec-header" data-target="body-scene-generator">
-      <span class="lp-sec-icon">ENV</span> Environment Generator
-      <span class="lp-chevron">▾</span>
-    </div>
-    <div class="lp-sec-body open" id="body-scene-generator">
-      <div class="lp-field">
-        <label class="lp-label">Environment</label>
-        <select id="lp-env-preset">
-          <option value="rice_field">Ladang Padi</option>
-          <option value="forest">Hutan</option>
-          <option value="classroom">Ruangan Kelas</option>
-        </select>
-      </div>
-
-      <div class="lp-field">
-        <label class="lp-label">Target Objects <span id="lp-val-env-count">500</span></label>
-        <div class="lp-slider-row">
-          <input type="range" id="lp-env-count-slider" min="50" max="5000" step="50" value="500">
-          <input type="number" class="lp-num-input" id="lp-env-count-num" min="1" max="50000" step="1" value="500">
-        </div>
-      </div>
-
-      <div class="lp-field">
-        <label class="lp-label">Style</label>
-        <select id="lp-env-style">
-          <option value="minecraft">Minecraft / Blocky</option>
-        </select>
-      </div>
-
-      <div class="lp-style-options" id="lp-minecraft-options">
-        <div class="lp-field">
-          <label class="lp-label">Block Size <span id="lp-val-env-block">1.0</span></label>
-          <input type="range" id="lp-env-block-size" min="0.5" max="4" step="0.5" value="1">
-        </div>
-
-        <div class="lp-field">
-          <label class="lp-label">Density Simplification <span id="lp-val-env-density">100%</span></label>
-          <input type="range" id="lp-env-density" min="0.25" max="1" step="0.05" value="1">
-        </div>
-      </div>
-
-      <div class="lp-env-presets">
-        <button class="lp-preset-btn" data-env-count="100">100</button>
-        <button class="lp-preset-btn" data-env-count="500">500</button>
-        <button class="lp-preset-btn" data-env-count="1000">1000</button>
-        <button class="lp-preset-btn" data-env-count="2500">2500</button>
-      </div>
-
-      <button class="lp-btn lp-btn-primary" id="lp-btn-env-generate">Generate Environment</button>
-      <button class="lp-btn" id="lp-btn-env-regenerate">Regenerate</button>
-      <button class="lp-btn lp-btn-danger" id="lp-btn-env-clear">Clear Scene</button>
-
-      <div class="lp-scene-summary" id="lp-scene-summary">
-        <div class="lp-scene-summary-title">Scene: Random</div>
-        <div class="lp-scene-group-list" id="lp-scene-groups">No environment scene generated.</div>
-      </div>
-    </div>
-  </section>
-
   <section class="lp-section">
     <div class="lp-sec-header" data-target="body-culling">
       <span class="lp-sec-icon">✂</span> Culling Methods
@@ -479,6 +418,21 @@ input[type=range]::-webkit-slider-thumb {
   border-color: var(--lp-accent);
   box-shadow: 0 0 6px rgba(0,200,255,0.2);
 }
+.lp-text-input {
+  width: 100%;
+  background: rgba(0,200,255,0.06);
+  border: 1px solid var(--lp-border);
+  border-radius: 4px;
+  color: var(--lp-accent);
+  font-family: var(--lp-mono);
+  font-size: 0.72rem;
+  padding: 5px 8px;
+  outline: none;
+}
+.lp-text-input:focus {
+  border-color: var(--lp-accent);
+  box-shadow: 0 0 6px rgba(0,200,255,0.2);
+}
 
 /* ── Speed presets ── */
 .lp-speed-presets {
@@ -487,21 +441,6 @@ input[type=range]::-webkit-slider-thumb {
   gap: 5px;
   margin-top: 8px;
 }
-.lp-env-presets {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 5px;
-  margin: 8px 0 10px;
-}
-.lp-style-options {
-  display: none;
-  border: 1px solid rgba(0,200,255,0.09);
-  border-radius: 6px;
-  background: rgba(0,200,255,0.025);
-  padding: 8px 8px 0;
-  margin-bottom: 10px;
-}
-.lp-style-options.show { display: block; }
 .lp-preset-btn {
   padding: 6px 4px;
   background: rgba(0,200,255,0.05);
@@ -715,7 +654,6 @@ export class LeftPanel {
         this._bindSections();
         this._bindObjectType();
         this._bindScene();
-        this._bindSceneGenerator();
         this._bindCullingToggles();
         this._bindCameraSpeed();
         this._bindPerf();
@@ -755,15 +693,6 @@ export class LeftPanel {
         if (numIn)  numIn.value  = count;
     }
 
-    syncSceneGeneratorCount(count) {
-        const slider = document.getElementById('lp-env-count-slider');
-        const numIn  = document.getElementById('lp-env-count-num');
-        const label  = document.getElementById('lp-val-env-count');
-        if (slider) slider.value = Math.max(Number(slider.min), Math.min(Number(slider.max), count));
-        if (numIn)  numIn.value  = count;
-        if (label)  label.textContent = Number(count).toLocaleString();
-    }
-
     updateSceneSummary(label = 'Random', groups = {}, total = 0) {
         const title = document.querySelector('#lp-scene-summary .lp-scene-summary-title');
         const list = document.getElementById('lp-scene-groups');
@@ -787,17 +716,6 @@ export class LeftPanel {
                 row.append(type, value);
                 list.appendChild(row);
             });
-    }
-
-    syncEnvironmentStyleOptions(settings = {}) {
-        const style = 'minecraft';
-        const blockSize = Math.max(0.5, Math.min(4, parseFloat(settings.blockSize) || 1));
-        const density = Math.max(0.25, Math.min(1, parseFloat(settings.densitySimplification) || 1));
-        const styleSelect = document.getElementById('lp-env-style');
-        if (styleSelect) styleSelect.value = style;
-        this._setRangeLabel('lp-env-block-size', 'lp-val-env-block', blockSize, v => Number(v).toFixed(1));
-        this._setRangeLabel('lp-env-density', 'lp-val-env-density', density, v => `${Math.round(v * 100)}%`);
-        this._toggleMinecraftOptions(style);
     }
 
     // ────────────────────────────────────────────────────────
@@ -889,55 +807,6 @@ export class LeftPanel {
             this.callbacks.onGenerate?.());
     }
 
-    _bindSceneGenerator() {
-        const preset = document.getElementById('lp-env-preset');
-        const slider = document.getElementById('lp-env-count-slider');
-        const numIn  = document.getElementById('lp-env-count-num');
-        const label  = document.getElementById('lp-val-env-count');
-        const styleSelect = document.getElementById('lp-env-style');
-        const blockSize = document.getElementById('lp-env-block-size');
-        const density = document.getElementById('lp-env-density');
-
-        const applyCount = (raw) => {
-            let v = Math.max(1, Math.min(50000, parseInt(raw) || 500));
-            if (slider) slider.value = Math.max(Number(slider.min), Math.min(Number(slider.max), v));
-            if (numIn) numIn.value = v;
-            if (label) label.textContent = v.toLocaleString();
-            this.callbacks.onEnvironmentCount?.(v);
-        };
-
-        preset?.addEventListener('change', e => this.callbacks.onEnvironmentPreset?.(e.target.value));
-        styleSelect?.addEventListener('change', e => {
-            const style = 'minecraft';
-            this._toggleMinecraftOptions(style);
-            this.callbacks.onEnvironmentStyle?.(style);
-        });
-        blockSize?.addEventListener('input', e => {
-            const value = Math.max(0.5, Math.min(4, parseFloat(e.target.value) || 1));
-            this._setRangeLabel('lp-env-block-size', 'lp-val-env-block', value, v => Number(v).toFixed(1));
-            this.callbacks.onEnvironmentBlockSize?.(value);
-        });
-        density?.addEventListener('input', e => {
-            const value = Math.max(0.25, Math.min(1, parseFloat(e.target.value) || 1));
-            this._setRangeLabel('lp-env-density', 'lp-val-env-density', value, v => `${Math.round(v * 100)}%`);
-            this.callbacks.onEnvironmentDensitySimplification?.(value);
-        });
-        slider?.addEventListener('input', e => applyCount(e.target.value));
-        numIn?.addEventListener('input', e => applyCount(e.target.value));
-        numIn?.addEventListener('keydown', e => { if (e.key === 'Enter') applyCount(e.target.value); });
-
-        document.querySelectorAll('[data-env-count]').forEach(btn => {
-            btn.addEventListener('click', () => applyCount(btn.dataset.envCount));
-        });
-
-        document.getElementById('lp-btn-env-generate')?.addEventListener('click', () =>
-            this.callbacks.onGenerateEnvironment?.());
-        document.getElementById('lp-btn-env-regenerate')?.addEventListener('click', () =>
-            this.callbacks.onGenerateEnvironment?.());
-        document.getElementById('lp-btn-env-clear')?.addEventListener('click', () =>
-            this.callbacks.onClearGeneratedScene?.());
-    }
-
     _bindCullingToggles() {
         const map = {
             'lp-toggleFrustum':   'useFrustum',
@@ -998,11 +867,6 @@ export class LeftPanel {
             this.callbacks.onChartPanel?.());
         document.getElementById('lp-btn-export')?.addEventListener('click', () =>
             this.callbacks.onExportJSON?.());
-    }
-
-    _toggleMinecraftOptions(style) {
-        const options = document.getElementById('lp-minecraft-options');
-        options?.classList.toggle('show', style === 'minecraft');
     }
 
     _setValuePair(sliderId, numId, labelId, value, fmt) {

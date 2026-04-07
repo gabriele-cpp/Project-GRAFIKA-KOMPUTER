@@ -10,7 +10,6 @@ import { LOD }              from './culling/lod.js';         // [BARU]
 import { OcclusionCuller }  from './culling/occlusion.js';   // [BARU]
 
 import { generateObjects, generateClustered } from './objects/objects.js'; // [BARU]
-import { generateEnvironmentScene }          from './objects/scene-generator.js';
 import { PerformanceMonitor }               from './engine/performance.js'; // [BARU]
 import { ChartPanel }                       from './ui/chart-panel.js';     // [BARU]
 import { LeftPanel }                        from './ui/left-panel.js';      // [BARU — Fitur 1-6]
@@ -22,6 +21,7 @@ import { ImportPanel }                      from './ui/import-panel.js';       /
 const vertexShaderCode = `
     attribute vec4 aVertexPosition;
     attribute vec3 aVertexNormal;
+    attribute vec3 aVertexColor;
     uniform vec4 uOffset;
     uniform float uScale;           // [BARU] LOD scale
     uniform vec3 uScaleVec;         // per-object non-uniform scale
@@ -29,6 +29,7 @@ const vertexShaderCode = `
     uniform mat4 uViewMatrix;
     uniform mat4 uProjectionMatrix;
     varying vec3 vNormal;
+    varying vec3 vColor;
 
     void main() {
         vec3 scaled = aVertexPosition.xyz * uScaleVec * uScale;
@@ -46,14 +47,17 @@ const vertexShaderCode = `
             aVertexNormal.y,
             aVertexNormal.x * s + aVertexNormal.z * c
         );
+        vColor = aVertexColor;
     }
 `;
 
 const fragmentShaderCode = `
     precision mediump float;
     varying vec3 vNormal;
+    varying vec3 vColor;
     uniform vec3 uLightDirection;
     uniform vec3 uBaseColor;
+    uniform bool uUseVertexColor;
     uniform float uLodLevel;        // [BARU] level LOD untuk visualisasi debug
 
     void main() {
@@ -61,7 +65,7 @@ const fragmentShaderCode = `
         vec3 lightDir = normalize(uLightDirection);
         float diffuse = max(dot(normal, lightDir), 0.0);
 
-        vec3 baseColor = uBaseColor;
+        vec3 baseColor = uUseVertexColor ? vColor : uBaseColor;
         vec3 baseNeon  = baseColor * 0.9;
         vec3 highlight = baseColor * diffuse * 0.6;
         vec3 finalColor = baseNeon + highlight;
@@ -147,6 +151,7 @@ const scaleVecLoc  = gl.getUniformLocation(shader.program, 'uScaleVec');
 const rotationYLoc = gl.getUniformLocation(shader.program, 'uRotationY');
 const lightDirLoc  = gl.getUniformLocation(shader.program, 'uLightDirection');
 const baseColorLoc = gl.getUniformLocation(shader.program, 'uBaseColor');
+const useVertexColorLoc = gl.getUniformLocation(shader.program, 'uUseVertexColor');
 const lodLevelLoc  = gl.getUniformLocation(shader.program, 'uLodLevel');
 
 // Uniform locations — bbox shader
@@ -269,10 +274,8 @@ function exportPerformanceJSON() {
         },
         geometryType: currentGeoType,
         sceneMode:    state.mode,
-        environmentPreset: state.environmentPreset,
         environmentLabel:  state.environmentLabel,
         environmentGroups: state.environmentGroups,
-        environmentStyle:  state.environmentStyle,
     };
     downloadJSON(data);
     showToast('Performance data berhasil diekspor sebagai JSON.');
@@ -290,11 +293,6 @@ const state = {
     objectCount:    500,
     mode:           'random', // 'random' | 'clustered'
     paletteIdx:     0,
-    environmentPreset: 'rice_field',
-    environmentCount: 500,
-    environmentStyle: 'minecraft',
-    environmentBlockSize: 1,
-    environmentDensitySimplification: 1,
     environmentLabel: 'Random',
     environmentGroups: {},
 };
@@ -347,6 +345,7 @@ function getSceneObjectCount() {
 }
 
 function getGeneratedBounds(object) {
+    if (object.bounds) return object.bounds;
     const scaleVec = object.scaleVec || [object.scale || 1, object.scale || 1, object.scale || 1];
     const halfSize = scaleVec.map(value => Math.max(Math.abs(value), 0.05));
     const radius = Math.max(object.radius || Math.hypot(halfSize[0], halfSize[1], halfSize[2]), 0.1);
@@ -427,33 +426,11 @@ function regenerateObjects() {
 }
 
 function generateEnvironment() {
-    const scene = generateEnvironmentScene(state.environmentPreset, state.environmentCount, {
-        style: 'minecraft',
-        blockSize: state.environmentBlockSize,
-        densitySimplification: state.environmentDensitySimplification,
-    });
-    cubeData = scene.objects;
-    _savedCubeData = [];
-    state.objectCount = cubeData.length;
-    state.environmentLabel = scene.label;
-    state.environmentGroups = scene.groups;
-    currentGeoType = 'environment';
-    activeMesh = getMeshForType('cube');
-    octree.rebuild(cubeData);
-    registerGeneratedObjects(cubeData);
-    syncSceneUI();
-    leftPanel.syncObjCount?.(state.objectCount);
-    leftPanel.updateSceneSummary?.(state.environmentLabel, state.environmentGroups, cubeData.length);
-    console.info('[SceneGenerator] Generated environment scene', {
-        preset: scene.preset,
-        style: scene.style,
-        totalObjects: cubeData.length,
-        groups: scene.groups,
-    });
-    showToast(`${scene.label} scene generated: ${cubeData.length.toLocaleString()} objects.`);
+    regenerateObjects();
 }
 
 function clearGeneratedScene() {
+    currentGeoType = 'none';
     cubeData = [];
     _savedCubeData = [];
     state.objectCount = 0;
@@ -467,7 +444,7 @@ function clearGeneratedScene() {
     showToast('Generated scene cleared. Imported objects tetap dipertahankan.');
 }
 
-regenerateObjects(); // Initial population
+regenerateObjects(); // Initial generated scene
 
 // KEYBOARD CAMERA CONTROL 
 const keys = {};
@@ -582,7 +559,9 @@ function gameLoop() {
     // STEP 1: Spatial pruning via Octree (O(log n) vs O(n))
     if (state.useOctree && state.useFrustum) {
         octree.queryFrustum(frustum, octreeCandidates);
-        candidates = octreeCandidates.filter(isInFrustum).concat(importedCullingObjects.filter(isInFrustum));
+        candidates = octreeCandidates
+            .filter(isInFrustum)
+            .concat(importedCullingObjects.filter(isInFrustum));
     } else if (state.useFrustum && !state.useOctree) {
         // Frustum culling manual (seperti kode asli)
         candidates = sceneCullingObjects.filter(isInFrustum);
@@ -650,7 +629,7 @@ function gameLoop() {
 
         // STEP 3: RENDER (sama seperti kode asli, + scale & lodLevel uniform)
         // Skip jika type = 'none' (activeMesh null) — cubeData sudah dikosongkan, loop ini tidak akan dicapai
-        const mesh = data.geometry ? getMeshForType(data.geometry) : activeMesh;
+        const mesh = data.mesh || (data.geometry ? getMeshForType(data.geometry) : activeMesh);
         if (!mesh) { continue; }
         const scaleVec = data.scaleVec || [data.scale || 1, data.scale || 1, data.scale || 1];
 
@@ -660,12 +639,12 @@ function gameLoop() {
         gl.uniform1f(scaleLoc, lodResult.scale);    // [BARU]
         gl.uniform3fv(scaleVecLoc, scaleVec);
         gl.uniform1f(rotationYLoc, data.rotationY || 0);
+        gl.uniform1i(useVertexColorLoc, mesh.hasColors ? 1 : 0);
         gl.uniform1f(lodLevelLoc, state.showLODColor ? lodResult.level : 0); // [BARU]
 
         mesh.draw(shader.program);  // pakai activeMesh atau geometry per object
         perfMonitor.countDrawCall(); 
         drawnObjects++;
-
         // Tambahkan ke occluder list (hanya objek dekat saja)
         if (state.useOcclusion && data.category !== 'Terrain' && (dist < 80 || bounds.radius > 6) && occluders.length < 60) {
             occluders.push({ pos: bounds.center, dist, radius: Math.max(8, Math.min(35, bounds.radius || 8)) });
@@ -788,11 +767,6 @@ window.addEventListener('DOMContentLoaded', () => {
         onMode:    (mode)  => { state.mode = mode; },
         onPalette: (idx)   => { state.paletteIdx = idx; },
         onGenerate: ()     => { regenerateObjects(); },
-        onEnvironmentPreset: (preset) => { state.environmentPreset = preset; },
-        onEnvironmentCount:  (count)  => { state.environmentCount = count; },
-        onEnvironmentStyle:  (style)  => { state.environmentStyle = style; },
-        onEnvironmentBlockSize: (value) => { state.environmentBlockSize = value; },
-        onEnvironmentDensitySimplification: (value) => { state.environmentDensitySimplification = value; },
         onGenerateEnvironment: () => { generateEnvironment(); },
         onClearGeneratedScene: () => { clearGeneratedScene(); },
 
@@ -828,12 +802,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
     leftPanel.syncState(state);
     leftPanel.syncObjCount(state.objectCount);
-    leftPanel.syncSceneGeneratorCount(state.environmentCount);
-    leftPanel.syncEnvironmentStyleOptions({
-        style: state.environmentStyle,
-        blockSize: state.environmentBlockSize,
-        densitySimplification: state.environmentDensitySimplification,
-    });
     leftPanel.updateSceneSummary(state.environmentLabel, state.environmentGroups, cubeData.length);
 
     // Mount Import Panel (right sidebar)

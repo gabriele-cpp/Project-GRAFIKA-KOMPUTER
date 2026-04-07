@@ -156,6 +156,7 @@ export class ModelImporter {
         this.select(entry.id);
         this._visible = true;
         this._canvas.style.display = 'block';
+        this._notifyRegistryChange('duplicate', entry);
         console.info('[ModelImporter] Duplicate created:', this._debugEntry(entry));
         return entry.id;
     }
@@ -226,6 +227,21 @@ export class ModelImporter {
             entry.cullingVisible = visible;
             entry.root.visible = visible;
         }
+    }
+
+    snapToTerrain(id, heightFn) {
+        const entry = this.objects.find(item => item.id === id);
+        if (!entry || typeof heightFn !== 'function') return false;
+        const bounds = this._updateBounds(entry);
+        if (!bounds) return false;
+        const terrainY = heightFn(entry.root.position.x, entry.root.position.z);
+        const deltaY = terrainY - bounds.min[1] + 0.05;
+        if (!Number.isFinite(deltaY)) return false;
+        entry.root.position.y += deltaY;
+        entry.root.updateMatrixWorld(true);
+        this._updateBounds(entry);
+        this._notifyRegistryChange('transform', entry);
+        return true;
     }
 
     extractGeometry() {
@@ -415,6 +431,7 @@ export class ModelImporter {
         this._pendingFocus = entry;
         this._visible = true;
         this._canvas.style.display = 'block';
+        this._notifyRegistryChange('add', entry);
 
         console.info('[ModelImporter] Object berhasil masuk scene:', this._debugEntry(entry));
         return entry;
