@@ -114,6 +114,9 @@ const bbox     = createBBoxMesh(gl);
 
 const aspect   = renderer.canvas.width / renderer.canvas.height;
 const camera   = new Camera(Math.PI / 4, aspect, 0.1, 2000.0);
+window.addEventListener('resize', () => {
+    camera.updateAspect(renderer.canvas.width / renderer.canvas.height);
+});
 
 // Culling systems
 const frustum   = new Frustum();
@@ -184,11 +187,8 @@ const modelImporter = new ModelImporter();
 
 modelImporter.onLoad = (filename, meta, autoScale) => {
     importPanel.setModelLoaded(filename, meta);
-    // Sync auto-scale ke slider UI agar tampilan konsisten
-    if (autoScale != null) {
-        importPanel.syncScale(autoScale);
-    }
-    showToast(`"${filename}" berhasil dimuat!`);
+    if (autoScale != null) importPanel.syncScale(autoScale);
+    showToast(`"${filename}" berhasil dimuat dan difokuskan di scene.`);
 };
 modelImporter.onError    = (msg) => { showToast(`Error: ${msg}`); };
 modelImporter.onProgress = (pct) => { importPanel.setProgress(pct); };
@@ -292,11 +292,13 @@ let mouseDown = false;
 let lastMouseX = 0, lastMouseY = 0;
 document.addEventListener('mousedown', e => {
     // Jangan trigger camera drag saat klik di UI panels
+    if (e.defaultPrevented)                    return;
     if (e.target.closest('#left-panel'))       return;
     if (e.target.closest('#left-panel-toggle')) return;
     if (e.target.closest('#perf-overlay'))      return;
     if (e.target.closest('#import-panel'))      return;
     if (e.target.closest('#ip-toggle'))         return;
+    if (modelImporter.shouldHandlePointer(e))   return;
     mouseDown = true;
     lastMouseX = e.clientX; lastMouseY = e.clientY;
     renderer.canvas.requestPointerLock();
@@ -558,7 +560,6 @@ window.addEventListener('DOMContentLoaded', () => {
             if (key === 'useLOD')       lod.enabled       = val;
             if (key === 'useOcclusion') occlusion.enabled = val;
             // Also sync right panel checkboxes
-            const rightId = key.replace(/([A-Z])/g, m => m).replace('use','toggle').replace('show','toggle');
             // Map key → right panel checkbox id
             const rightMap = {
                 useFrustum:   'toggleFrustum',

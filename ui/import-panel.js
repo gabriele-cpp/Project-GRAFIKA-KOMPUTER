@@ -337,7 +337,7 @@ const HTML = `
       <div class="ip-upload-label">Drag & drop file here</div>
       <div class="ip-upload-formats">GLTF · GLB · OBJ · BIN</div>
     </div>
-    <input type="file" id="ip-file-input" accept=".gltf,.glb,.obj,.bin" multiple style="display:none">
+    <input type="file" id="ip-file-input" accept=".gltf,.glb,.obj,.bin,.mtl,.png,.jpg,.jpeg,.webp,.ktx2" multiple style="display:none">
 
     <div class="ip-loading" id="ip-loading">
       <div class="ip-loading-bar">
