@@ -1,4 +1,4 @@
-# 3D Simulator — Hybrid Spatial-Occlusion Culling
+# PROJECT GRAFIKA KOMPUTER - Simulator Game 3D dengan Optimasi Culling dan Rendering Real-Time
 
 **Judul Penelitian:** Simulator Game 3D dengan Optimasi Culling dan Rendering Real-Time  
 **Tim:** Dheavanda Wijaya, Gabriel Emil, Kenny Lay
@@ -30,12 +30,12 @@ simulator-3d/
 │
 ├── culling/
 │   ├── frustum.js          # View Frustum Culling (dari kode asli, tidak diubah)
-│   ├── octree.js           ⭐ BARU — Dynamic Octree spatial partitioning
-│   ├── lod.js              ⭐ BARU — Level of Detail berbasis jarak kamera
-│   └── occlusion.js        ⭐ BARU — Hybrid Occlusion Estimation
+│   ├── octree.js           Dynamic Octree spatial partitioning
+│   ├── lod.js              Level of Detail berbasis jarak kamera
+│   └── occlusion.js        Hybrid Occlusion Estimation
 │
 └── objects/
-    └── objects.js          ⭐ DIMODIFIKASI — Procedural generator + clustering
+    └── objects.js          Procedural generator + clustering
 ```
 
 ---
@@ -53,38 +53,26 @@ Frame N:
   5. Render objects yang lolos + update stats
 ```
 
-### Perbandingan dengan Kode Asli
-
-| Aspek | Kode Asli | Kode Baru |
-|-------|-----------|-----------|
-| Frustum Culling | ✅ (O(n) per frame) | ✅ (O(log n) via Octree) |
-| Occlusion Culling | ❌ (file kosong) | ✅ Proximity estimation |
-| Level of Detail | ❌ (file kosong) | ✅ 3 level berbasis jarak |
-| Octree | ❌ | ✅ Dynamic octree (depth 5) |
-| Debug Visualization | ❌ | ✅ Bounding box + LOD color |
-| UI | Checkbox sederhana | Modern floating panel |
-| Object Generation | 50.000 kubus statis | Prosedural + clustered |
-| Model Upload | ❌ | ✅ GLTF/OBJ placeholder |
 
 ---
 
 ## Cara Kerja Sistem Culling
 
-### 1. View Frustum Culling (Kode Asli — Dipertahankan)
+### 1. View Frustum Culling 
 Mengekstrak 6 bidang dari matriks proyeksi×view. Setiap objek dicek apakah bounding sphere-nya bersinggungan dengan frustum. Jika tidak → di-cull.
 
-### 2. Octree Spatial Partitioning (Baru — NOVELTY)
+### 2. Octree Spatial Partitioning 
 - Dunia dibagi menjadi hierarki node 3D (tiap node = 8 oktan anak)
 - Saat frustum culling, traverse hanya node yang **bersinggungan** dengan frustum
 - Node yang seluruhnya di luar frustum → seluruh subtree di-skip
 - Kompleksitas: **O(log n)** vs O(n) tanpa octree
 
-### 3. Occlusion Culling (Baru)
+### 3. Occlusion Culling 
 Estimasi dua tahap (adaptasi dari OccluGaussian untuk WebGL):
 - **Back-face cull**: objek di belakang kamera langsung di-cull (dot product)
 - **Proximity occlusion**: objek yang berdekatan dengan occluder lebih dekat → di-cull
 
-### 4. Level of Detail (Baru)
+### 4. Level of Detail 
 Berdasarkan jarak kamera:
 - `< 150` = Full detail (scale 1.0, warna normal)
 - `< 350` = Medium detail (scale 0.85, warna kuning di debug mode)
