@@ -1,161 +1,201 @@
-const HISTORY_SIZE = 120; // 120 sample = ~60 detik pada 2fps update
+const HISTORY_SIZE = 120;
 
 function makeRingBuffer(size) {
-    const buf = new Array(size).fill(0);
+    const buffer = new Array(size).fill(0);
     let head = 0;
     return {
-        push(v) { buf[head % size] = v; head++; },
-        get()   { 
-            const out = [];
-            const start = head >= size ? head - size : 0;
-            for (let i = 0; i < Math.min(head, size); i++) {
-                out.push(buf[(start + i) % size]);
+        push(value) {
+            buffer[head % size] = value;
+            head++;
+        },
+        get() {
+            const length = Math.min(head, size);
+            const offset = Math.max(0, head - size);
+            const values = [];
+            for (let index = 0; index < length; index++) {
+                values.push(buffer[(offset + index) % size]);
             }
-            return out;
+            return values;
         },
-        latest() { return head > 0 ? buf[(head - 1) % size] : 0; },
-        avg()    {
-            const d = this.get();
-            return d.length ? d.reduce((a,b)=>a+b,0)/d.length : 0;
+        avg() {
+            const values = this.get();
+            return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
         },
-        max()    { return Math.max(...this.get(), 0); },
-        min()    { const d = this.get(); return d.length ? Math.min(...d) : 0; },
+        max() {
+            return Math.max(...this.get(), 0);
+        },
+        min() {
+            const values = this.get();
+            return values.length ? Math.min(...values) : 0;
+        },
     };
+}
+
+function getTimerSupport(gl) {
+    const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+    if (isWebGL2) {
+        const extension = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+        return extension ? { extension, webgl2: true } : null;
+    }
+    const extension = gl.getExtension('EXT_disjoint_timer_query');
+    return extension ? { extension, webgl2: false } : null;
 }
 
 export class PerformanceMonitor {
     constructor(gl) {
         this.gl = gl;
-
-        // Ring buffers untuk setiap metrik
         this.history = {
-            fps:          makeRingBuffer(HISTORY_SIZE),
-            cpuFrameMs:   makeRingBuffer(HISTORY_SIZE),
-            gpuFrameMs:   makeRingBuffer(HISTORY_SIZE),
-            heapMB:       makeRingBuffer(HISTORY_SIZE),
-            drawCalls:    makeRingBuffer(HISTORY_SIZE),
-            rendered:     makeRingBuffer(HISTORY_SIZE),
-            culledTotal:  makeRingBuffer(HISTORY_SIZE),
-            cullEff:      makeRingBuffer(HISTORY_SIZE),   // %
-            frameTimeBudget: makeRingBuffer(HISTORY_SIZE), // % of 16.67ms used
+            fps: makeRingBuffer(HISTORY_SIZE),
+            cpuFrameMs: makeRingBuffer(HISTORY_SIZE),
+            gpuFrameMs: makeRingBuffer(HISTORY_SIZE),
+            heapMB: makeRingBuffer(HISTORY_SIZE),
+            drawCalls: makeRingBuffer(HISTORY_SIZE),
+            rendered: makeRingBuffer(HISTORY_SIZE),
+            culledTotal: makeRingBuffer(HISTORY_SIZE),
+            cullEff: makeRingBuffer(HISTORY_SIZE),
+            frameTimeBudget: makeRingBuffer(HISTORY_SIZE),
+            vertexCount: makeRingBuffer(HISTORY_SIZE),
+            octreeDepth: makeRingBuffer(HISTORY_SIZE),
         };
 
-        // State per-frame (di-reset tiap frame)
-        this._frameStart  = 0;
-        this._frameCount  = 0;
-        this._lastSecond  = performance.now();
+        this._frameStart = 0;
+        this._frameCount = 0;
+        this._lastFpsTick = performance.now();
         this._drawCallsThisFrame = 0;
+        this._vertexCountThisFrame = 0;
 
-        // GPU Timer Query (WebGL2 + EXT_disjoint_timer_query_webgl2)
-        this._gpuExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-        this._gpuQuery    = null;
-        this._gpuPending  = false;
-        this._lastGpuMs   = 0;
-        this._gpuSupported = !!this._gpuExt;
+        const timerSupport = getTimerSupport(gl);
+        this._gpuSupport = timerSupport;
+        this._gpuQuery = null;
+        this._gpuPending = false;
+        this._lastGpuMs = 0;
 
-        // Snapshot untuk stats panel
         this.snapshot = {
-            fps: 0, cpuFrameMs: 0, gpuFrameMs: 0,
-            heapMB: 0, heapLimit: 0,
-            drawCalls: 0, rendered: 0, culledTotal: 0,
-            cullEff: 0, frameTimeBudget: 0,
-            gpuSupported: this._gpuSupported,
+            fps: 0,
+            cpuFrameMs: 0,
+            gpuFrameMs: 0,
+            heapMB: 0,
+            heapLimit: 0,
+            drawCalls: 0,
+            rendered: 0,
+            culledTotal: 0,
+            cullEff: 0,
+            frameTimeBudget: 0,
+            vertexCount: 0,
+            octreeDepth: 0,
+            stageStats: null,
+            gpuSupported: !!timerSupport,
         };
     }
 
-    // Panggil di AWAL setiap frame
     beginFrame() {
         this._frameStart = performance.now();
         this._drawCallsThisFrame = 0;
+        this._vertexCountThisFrame = 0;
 
-        // Mulai GPU query jika didukung dan tidak ada query pending
-        if (this._gpuSupported && !this._gpuPending) {
-            this._gpuQuery = this.gl.createQuery();
-            this.gl.beginQuery(this._gpuExt.TIME_ELAPSED_EXT, this._gpuQuery);
+        if (this._gpuSupport && !this._gpuPending) {
+            if (this._gpuSupport.webgl2) {
+                this._gpuQuery = this.gl.createQuery();
+                this.gl.beginQuery(this._gpuSupport.extension.TIME_ELAPSED_EXT, this._gpuQuery);
+            } else {
+                this._gpuQuery = this._gpuSupport.extension.createQueryEXT();
+                this._gpuSupport.extension.beginQueryEXT(this._gpuSupport.extension.TIME_ELAPSED_EXT, this._gpuQuery);
+            }
         }
     }
 
-    // Panggil setelah setiap gl.drawElements / gl.drawArrays
-    countDrawCall() {
+    countDrawCall(vertexCount = 0) {
         this._drawCallsThisFrame++;
+        this._vertexCountThisFrame += Number(vertexCount) || 0;
     }
 
-    // Panggil di AKHIR setiap frame, sebelum requestAnimationFrame
-    endFrame(rendered, culledTotal, totalObjects) {
+    endFrame(rendered, culledTotal, totalObjects, extra = {}) {
         const frameMs = performance.now() - this._frameStart;
 
-        // Tutup GPU query
-        if (this._gpuSupported && this._gpuQuery && !this._gpuPending) {
-            this.gl.endQuery(this._gpuExt.TIME_ELAPSED_EXT);
+        if (this._gpuSupport && this._gpuQuery && !this._gpuPending) {
+            if (this._gpuSupport.webgl2) {
+                this.gl.endQuery(this._gpuSupport.extension.TIME_ELAPSED_EXT);
+            } else {
+                this._gpuSupport.extension.endQueryEXT(this._gpuSupport.extension.TIME_ELAPSED_EXT);
+            }
             this._gpuPending = true;
         }
 
-        // Cek hasil GPU query dari frame sebelumnya
-        if (this._gpuSupported && this._gpuPending && this._gpuQuery) {
-            const available = this.gl.getQueryParameter(
-                this._gpuQuery, this.gl.QUERY_RESULT_AVAILABLE
-            );
-            const disjoint = this.gl.getParameter(this._gpuExt.GPU_DISJOINT_EXT);
+        if (this._gpuSupport && this._gpuPending && this._gpuQuery) {
+            const extension = this._gpuSupport.extension;
+            const available = this._gpuSupport.webgl2
+                ? this.gl.getQueryParameter(this._gpuQuery, this.gl.QUERY_RESULT_AVAILABLE)
+                : extension.getQueryObjectEXT(this._gpuQuery, extension.QUERY_RESULT_AVAILABLE_EXT);
+            const disjoint = this.gl.getParameter(extension.GPU_DISJOINT_EXT);
+
             if (available && !disjoint) {
-                const ns = this.gl.getQueryParameter(this._gpuQuery, this.gl.QUERY_RESULT);
-                this._lastGpuMs = ns / 1e6; // nanoseconds → milliseconds
-                this.gl.deleteQuery(this._gpuQuery);
-                this._gpuQuery   = null;
+                const nanoseconds = this._gpuSupport.webgl2
+                    ? this.gl.getQueryParameter(this._gpuQuery, this.gl.QUERY_RESULT)
+                    : extension.getQueryObjectEXT(this._gpuQuery, extension.QUERY_RESULT_EXT);
+                this._lastGpuMs = nanoseconds / 1e6;
+                if (this._gpuSupport.webgl2) this.gl.deleteQuery(this._gpuQuery);
+                else extension.deleteQueryEXT(this._gpuQuery);
+                this._gpuQuery = null;
                 this._gpuPending = false;
             }
         }
 
-        // Memory
-        let heapMB = 0, heapLimit = 0;
+        let heapMB = 0;
+        let heapLimit = 0;
         if (performance.memory) {
-            heapMB    = performance.memory.usedJSHeapSize  / 1048576;
+            heapMB = performance.memory.usedJSHeapSize / 1048576;
             heapLimit = performance.memory.jsHeapSizeLimit / 1048576;
         }
 
-        // FPS setiap 500ms
         this._frameCount++;
         const now = performance.now();
-        const elapsed = now - this._lastSecond;
+        const elapsed = now - this._lastFpsTick;
         if (elapsed >= 500) {
             const fps = Math.round(this._frameCount / (elapsed / 1000));
             this._frameCount = 0;
-            this._lastSecond = now;
+            this._lastFpsTick = now;
             this.history.fps.push(fps);
             this.snapshot.fps = fps;
         }
 
-        const cullEff = totalObjects > 0
-            ? Math.round((culledTotal / totalObjects) * 100) : 0;
-        const budget = Math.min((frameMs / 16.667) * 100, 200); // % of 60fps budget
+        const cullEff = totalObjects > 0 ? Math.round((culledTotal / totalObjects) * 100) : 0;
+        const budget = Math.min((frameMs / 16.667) * 100, 200);
+        const octreeDepth = Number(extra.octreeDepth) || 0;
+        const vertexCount = Number(extra.vertexCount) || this._vertexCountThisFrame;
 
-        // Push ke history
-        this.history.cpuFrameMs.push(parseFloat(frameMs.toFixed(2)));
-        this.history.gpuFrameMs.push(parseFloat(this._lastGpuMs.toFixed(2)));
-        this.history.heapMB.push(parseFloat(heapMB.toFixed(1)));
+        this.history.cpuFrameMs.push(Number(frameMs.toFixed(2)));
+        this.history.gpuFrameMs.push(Number(this._lastGpuMs.toFixed(2)));
+        this.history.heapMB.push(Number(heapMB.toFixed(1)));
         this.history.drawCalls.push(this._drawCallsThisFrame);
         this.history.rendered.push(rendered);
         this.history.culledTotal.push(culledTotal);
         this.history.cullEff.push(cullEff);
-        this.history.frameTimeBudget.push(parseFloat(budget.toFixed(1)));
+        this.history.frameTimeBudget.push(Number(budget.toFixed(1)));
+        this.history.vertexCount.push(vertexCount);
+        this.history.octreeDepth.push(octreeDepth);
 
-        // Update snapshot
         Object.assign(this.snapshot, {
-            cpuFrameMs:      parseFloat(frameMs.toFixed(2)),
-            gpuFrameMs:      parseFloat(this._lastGpuMs.toFixed(2)),
-            heapMB:          parseFloat(heapMB.toFixed(1)),
-            heapLimit:       parseFloat(heapLimit.toFixed(0)),
-            drawCalls:       this._drawCallsThisFrame,
+            cpuFrameMs: Number(frameMs.toFixed(2)),
+            gpuFrameMs: Number(this._lastGpuMs.toFixed(2)),
+            heapMB: Number(heapMB.toFixed(1)),
+            heapLimit: Number(heapLimit.toFixed(0)),
+            drawCalls: this._drawCallsThisFrame,
             rendered,
             culledTotal,
             cullEff,
-            frameTimeBudget: parseFloat(budget.toFixed(1)),
+            frameTimeBudget: Number(budget.toFixed(1)),
+            vertexCount,
+            octreeDepth,
+            stageStats: extra.stageStats || null,
         });
     }
 
-    // Ambil data lengkap untuk chart
     getChartData() {
-        const len    = this.history.fps.get().length;
-        const labels = Array.from({ length: len }, (_, i) => `${i}`);
-        return { labels, history: this.history, snapshot: this.snapshot };
+        const length = this.history.fps.get().length;
+        return {
+            labels: Array.from({ length }, (_, index) => `${index}`),
+            history: this.history,
+            snapshot: this.snapshot,
+        };
     }
 }

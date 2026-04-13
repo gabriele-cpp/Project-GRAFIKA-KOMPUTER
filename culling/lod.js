@@ -1,42 +1,54 @@
 export class LOD {
     constructor() {
-        // Threshold jarak untuk setiap level — bisa diubah lewat UI
-        this.nearThreshold   = 150;   // < 150  = full detail
-        this.midThreshold    = 350;   // < 350  = medium detail
-        this.farThreshold    = 600;   // < 600  = low detail, >= 600 = cull
-
+        this.nearThreshold = 150;
+        this.midThreshold = 350;
+        this.farThreshold = 600;
         this.enabled = false;
+        this.distanceScale = 1.0;
+        this.transitionBand = 45;
     }
 
-    /**
-     * Hitung level LOD dan scale untuk sebuah objek.
-     * @param {number} dist  — Jarak dari kamera ke objek
-     * @returns {{ level: number, scale: number, shouldRender: boolean }}
-     */
     getLevel(dist) {
+        const scaledDistance = dist / Math.max(0.25, this.distanceScale || 1.0);
         if (!this.enabled) {
-            return { level: 0, scale: 1.0, shouldRender: true };
+            return { level: 0, scale: 1.0, shouldRender: true, blend: 1.0 };
         }
 
-        if (dist < this.nearThreshold) {
-            return { level: 0, scale: 1.0,  shouldRender: true };
-        } else if (dist < this.midThreshold) {
-            return { level: 1, scale: 0.85, shouldRender: true };
-        } else if (dist < this.farThreshold) {
-            return { level: 2, scale: 0.55, shouldRender: true };
-        } else {
-            return { level: 3, scale: 0.0,  shouldRender: false };
+        if (scaledDistance < this.nearThreshold) {
+            return { level: 0, scale: 1.0, shouldRender: true, blend: 1.0 };
         }
+        if (scaledDistance < this.midThreshold) {
+            return {
+                level: 1,
+                scale: this._smoothScale(scaledDistance, this.nearThreshold, this.midThreshold, 1.0, 0.84),
+                shouldRender: true,
+                blend: 1.0,
+            };
+        }
+        if (scaledDistance < this.farThreshold) {
+            return {
+                level: 2,
+                scale: this._smoothScale(scaledDistance, this.midThreshold, this.farThreshold, 0.84, 0.56),
+                shouldRender: true,
+                blend: 1.0,
+            };
+        }
+        return { level: 3, scale: 0.0, shouldRender: false, blend: 0.0 };
     }
 
-    /**
-     * Hitung jarak Euclidean antara posisi objek dan kamera.
-     */
     getDistance(objPos, camPos) {
         return Math.hypot(
             objPos[0] - camPos[0],
             objPos[1] - camPos[1],
             objPos[2] - camPos[2]
         );
+    }
+
+    _smoothScale(distance, start, end, scaleStart, scaleEnd) {
+        const bandStart = Math.max(start, end - this.transitionBand);
+        if (distance <= bandStart) return scaleStart;
+        const t = Math.max(0, Math.min(1, (distance - bandStart) / Math.max(1, end - bandStart)));
+        const eased = t * t * (3 - 2 * t);
+        return scaleStart + (scaleEnd - scaleStart) * eased;
     }
 }
