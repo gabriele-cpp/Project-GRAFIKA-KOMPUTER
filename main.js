@@ -8,7 +8,7 @@ import { LOD } from './culling/lod.js';
 import { OcclusionCuller } from './culling/occlusion.js';
 import { HybridCullingPipeline } from './culling/hybrid-pipeline.js';
 import { generateObjects, generateClustered } from './objects/objects.js';
-import { generateComplexityScene, generateVoxelWorld, generateDungeonWorld } from './objects/scene-generator.js';
+import { generateComplexityScene } from './objects/scene-generator.js';
 import { PerformanceMonitor } from './engine/performance.js';
 import { AdaptiveQualityManager } from './engine/adaptive-quality.js';
 import { CameraPathSystem } from './engine/camera-path.js';
@@ -19,8 +19,6 @@ import { ResearchPanel } from './ui/research-panel.js';
 import { createGeometry, GEOMETRY_TYPES } from './engine/geometry.js';
 import { ModelImporter } from './engine/model-importer.js';
 import { ImportPanel } from './ui/import-panel.js';
-import { HudOverlay } from './ui/hud.js';
-import { mountUI } from './ui/bootstrap.js';
 
 const vertexShaderCode = `
     attribute vec4 aVertexPosition;
@@ -83,66 +81,6 @@ const fragmentShaderCode = `
     }
 `;
 
-const instancedVertexShaderCode = `
-    attribute vec4 aVertexPosition;
-    attribute vec3 aVertexNormal;
-    attribute vec3 aInstanceOffset;
-    attribute vec3 aInstanceColor;
-    attribute vec3 aInstanceScaleVec;
-    attribute float aInstanceScale;
-    attribute float aInstanceRotationY;
-    attribute float aInstanceLod;
-    uniform mat4 uViewMatrix;
-    uniform mat4 uProjectionMatrix;
-    varying vec3 vNormal;
-    varying vec3 vColor;
-    varying float vLod;
-
-    void main() {
-        vec3 scaled = aVertexPosition.xyz * aInstanceScaleVec * aInstanceScale;
-        float c = cos(aInstanceRotationY);
-        float s = sin(aInstanceRotationY);
-        vec3 rotated = vec3(
-            scaled.x * c - scaled.z * s,
-            scaled.y,
-            scaled.x * s + scaled.z * c
-        );
-        vec4 finalPosition = vec4(rotated + aInstanceOffset, 1.0);
-        gl_Position = uProjectionMatrix * uViewMatrix * finalPosition;
-        vNormal = vec3(
-            aVertexNormal.x * c - aVertexNormal.z * s,
-            aVertexNormal.y,
-            aVertexNormal.x * s + aVertexNormal.z * c
-        );
-        vColor = aInstanceColor;
-        vLod = aInstanceLod;
-    }
-`;
-
-const instancedFragmentShaderCode = `
-    precision mediump float;
-    varying vec3 vNormal;
-    varying vec3 vColor;
-    varying float vLod;
-    uniform vec3 uLightDirection;
-    uniform bool uShowLodColor;
-
-    void main() {
-        vec3 normal = normalize(vNormal);
-        vec3 lightDir = normalize(uLightDirection);
-        float diffuse = max(dot(normal, lightDir), 0.0);
-        vec3 baseNeon = vColor * 0.9;
-        vec3 highlight = vColor * diffuse * 0.6;
-        vec3 finalColor = baseNeon + highlight;
-
-        if (uShowLodColor && vLod > 0.5) {
-            if (vLod < 1.5) finalColor = mix(finalColor, vec3(1.0, 1.0, 0.0), 0.4);
-            else finalColor = mix(finalColor, vec3(1.0, 0.2, 0.0), 0.5);
-        }
-        gl_FragColor = vec4(finalColor, 1.0);
-    }
-`;
-
 const bbVertexCode = `
     attribute vec4 aVertexPosition;
     uniform vec4 uOffset;
@@ -189,18 +127,22 @@ function downloadText(filename, text, type = 'text/plain') {
     anchor.click();
 }
 
-function randomSeed() {
-    return Math.floor(Math.random() * 1_000_000_000);
+function showToast(message) {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.style.opacity = '1';
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(() => {
+        toast.style.opacity = '0';
+    }, 3500);
 }
 
 const renderer = new Renderer('gameCanvas');
 const gl = renderer.gl;
 const shader = new Shader(gl, vertexShaderCode, fragmentShaderCode);
-const instancedShader = new Shader(gl, instancedVertexShaderCode, instancedFragmentShaderCode);
 const bbShader = new Shader(gl, bbVertexCode, bbFragmentCode);
 const bbox = createBBoxMesh(gl);
-const instancingExt = renderer.capabilities.webgl2 ? null : gl.getExtension('ANGLE_instanced_arrays');
-const instancingAvailable = renderer.capabilities.webgl2 || !!instancingExt;
 
 const aspect = renderer.canvas.width / renderer.canvas.height;
 const camera = new Camera(Math.PI / 4, aspect, 0.1, 2000.0);
@@ -222,7 +164,6 @@ const leftPanel = new LeftPanel();
 const researchPanel = new ResearchPanel();
 const importPanel = new ImportPanel();
 const modelImporter = new ModelImporter();
-const hud = new HudOverlay();
 
 const uniformLocations = {
     view: gl.getUniformLocation(shader.program, 'uViewMatrix'),
@@ -235,22 +176,6 @@ const uniformLocations = {
     baseColor: gl.getUniformLocation(shader.program, 'uBaseColor'),
     useVertexColor: gl.getUniformLocation(shader.program, 'uUseVertexColor'),
     lodLevel: gl.getUniformLocation(shader.program, 'uLodLevel'),
-};
-
-const instancedUniformLocations = {
-    view: gl.getUniformLocation(instancedShader.program, 'uViewMatrix'),
-    projection: gl.getUniformLocation(instancedShader.program, 'uProjectionMatrix'),
-    lightDir: gl.getUniformLocation(instancedShader.program, 'uLightDirection'),
-    showLodColor: gl.getUniformLocation(instancedShader.program, 'uShowLodColor'),
-};
-
-const instancedBuffers = {
-    offset: gl.createBuffer(),
-    color: gl.createBuffer(),
-    scaleVec: gl.createBuffer(),
-    scale: gl.createBuffer(),
-    rotation: gl.createBuffer(),
-    lod: gl.createBuffer(),
 };
 
 const bbUniformLocations = {
@@ -276,26 +201,16 @@ const state = {
     useLOD: false,
     useTemporalCoherence: true,
     usePredictiveCulling: true,
-    useInstancing: true,
     useAdaptiveBudget: false,
     showBBox: false,
     showLODColor: false,
     showHeatmap: false,
-    showOcclusionGrid: false,
     objectCount: 500,
-    mode: 'minecraft',
+    mode: 'random',
     paletteIdx: 0,
     complexity: 'medium',
-    sceneSeed: randomSeed(),
     environmentLabel: 'Random',
     environmentGroups: {},
-    occlusionResolution: 24,
-    lodNear: lod.nearThreshold,
-    lodMid: lod.midThreshold,
-    lodFar: lod.farThreshold,
-    lodTransitionBand: lod.transitionBand,
-    cameraPathSmoothing: true,
-    cameraPathConstantSpeed: true,
     qualityProfile: 'high',
     budgetAverageFps: 0,
     shadowQuality: 0.85,
@@ -303,10 +218,6 @@ const state = {
     dynamicLodDistanceScale: 1.0,
     lastStageStats: null,
 };
-
-if (!instancingAvailable) {
-    state.useInstancing = false;
-}
 
 const sceneRegistry = {
     generated: new Map(),
@@ -319,19 +230,6 @@ let speed = 1.5;
 let turnSpeed = 0.03;
 const keys = {};
 let mouseDown = false;
-const benchmarkMatrix = {
-    active: false,
-    queue: [],
-    runs: [],
-    current: null,
-};
-
-const occlusionOverlay = document.createElement('canvas');
-occlusionOverlay.width = 160;
-occlusionOverlay.height = 160;
-occlusionOverlay.style.cssText = 'position:fixed;right:18px;top:18px;width:160px;height:160px;border:1px solid rgba(124,242,255,0.5);background:rgba(0,0,0,0.55);z-index:140;display:none;image-rendering:pixelated;pointer-events:none;';
-document.body.appendChild(occlusionOverlay);
-const occlusionOverlayCtx = occlusionOverlay.getContext('2d');
 
 function getMeshForType(type = 'cube') {
     const meshType = GEOMETRY_TYPES.includes(type) ? type : 'cube';
@@ -339,27 +237,6 @@ function getMeshForType(type = 'cube') {
         meshCache.set(meshType, meshType === 'cube' ? new Mesh(gl) : createGeometry(gl, meshType));
     }
     return meshCache.get(meshType);
-}
-
-function setAttribDivisor(location, divisor) {
-    if (location < 0) return;
-    if (renderer.capabilities.webgl2) {
-        gl.vertexAttribDivisor(location, divisor);
-    } else if (instancingExt?.vertexAttribDivisorANGLE) {
-        instancingExt.vertexAttribDivisorANGLE(location, divisor);
-    }
-}
-
-function drawElementsInstanced(indexCount, indexType, instanceCount) {
-    if (renderer.capabilities.webgl2) {
-        gl.drawElementsInstanced(gl.TRIANGLES, indexCount, indexType, 0, instanceCount);
-    } else if (instancingExt?.drawElementsInstancedANGLE) {
-        instancingExt.drawElementsInstancedANGLE(gl.TRIANGLES, indexCount, indexType, 0, instanceCount);
-    }
-}
-
-function getMeshIndexType(mesh) {
-    return mesh.indexType || gl.UNSIGNED_SHORT;
 }
 
 function getGeneratedBounds(object) {
@@ -443,13 +320,10 @@ function getSceneObjectCount() {
 }
 
 function syncSceneUI() {
+    const total = getSceneObjectCount();
+    const objectCountDisplay = document.getElementById('obj-count-display');
+    if (objectCountDisplay) objectCountDisplay.textContent = `${total.toLocaleString()} objects`;
     importPanel.setObjectRegistry?.([...sceneRegistry.imported.values()], sceneRegistry.importedSelectedId);
-    leftPanel.syncSceneControls?.({
-        count: state.objectCount,
-        mode: state.mode,
-        paletteIdx: state.paletteIdx,
-    });
-    leftPanel.syncState?.(state);
     leftPanel.updateSceneSummary?.(state.environmentLabel, state.environmentGroups, sceneRegistry.generated.size);
     researchPanel.syncState(state);
 }
@@ -473,51 +347,27 @@ function regenerateObjects() {
 
     let objects = [];
     if (state.mode === 'clustered') {
-        objects = generateClustered(state.objectCount, 500, 12, state.sceneSeed);
+        objects = generateClustered(state.objectCount, 500, 12);
         state.environmentLabel = 'Clustered';
-        state.environmentGroups = { Clustered: objects.length };
-    } else if (state.mode === 'minecraft') {
-        const minecraftTarget = Math.max(12000, state.objectCount);
-        if (minecraftTarget !== state.objectCount) {
-            state.objectCount = minecraftTarget;
-        }
-        const world = generateVoxelWorld({
-            targetCount: minecraftTarget,
-            paletteIdx: state.paletteIdx,
-            seed: state.sceneSeed,
-        });
-        objects = world.objects;
-        state.environmentLabel = world.label;
-        state.environmentGroups = world.groups;
-    } else if (state.mode === 'dungeon') {
-        const dungeonTarget = Math.max(10000, state.objectCount);
-        if (dungeonTarget !== state.objectCount) {
-            state.objectCount = dungeonTarget;
-        }
-        const world = generateDungeonWorld({
-            targetCount: dungeonTarget,
-            paletteIdx: state.paletteIdx,
-            seed: state.sceneSeed,
-        });
-        objects = world.objects;
-        state.environmentLabel = world.label;
-        state.environmentGroups = world.groups;
     } else {
-        objects = generateObjects(state.objectCount, 500, state.paletteIdx, state.sceneSeed);
+        objects = generateObjects(state.objectCount, 500, state.paletteIdx);
         state.environmentLabel = 'Random';
-        state.environmentGroups = { [state.environmentLabel]: objects.length };
     }
+    state.environmentGroups = { [state.environmentLabel]: objects.length };
     rebuildScene(objects);
 }
 
 function generateComplexityPreset(level = 'medium') {
-    const scene = generateComplexityScene(level, state.paletteIdx, { seed: state.sceneSeed });
+    const scene = generateComplexityScene(level, state.paletteIdx);
     state.complexity = level;
     state.objectCount = scene.objects.length;
     state.environmentLabel = scene.label;
     state.environmentGroups = scene.groups;
     rebuildScene(scene.objects);
-    hud.showToast(`${scene.label} generated for benchmark experiments.`);
+    leftPanel.syncObjCount?.(state.objectCount);
+    const slider = document.getElementById('obj-slider');
+    if (slider) slider.value = state.objectCount;
+    showToast(`${scene.label} generated for benchmark experiments.`);
 }
 
 function clearGeneratedScene() {
@@ -547,12 +397,7 @@ function setGeometryType(type) {
         : generatedObjects.slice();
     rebuildScene(sourceObjects.map(object => ({
         ...object,
-        geometry: object.lockGeometry
-            ? (object.geometry || 'cube')
-            : (object.geometry === 'plane' ? 'plane' : type),
-        instancedKey: object.lockGeometry
-            ? (object.instancedKey || `voxel:${object.groupId || 'generated'}:${object.geometry || 'cube'}`)
-            : `${object.groupId || 'generated'}:${object.geometry === 'plane' ? 'plane' : type}`,
+        geometry: object.geometry === 'plane' ? 'plane' : type,
     })));
 }
 
@@ -580,20 +425,18 @@ function exportPerformanceJSON() {
                 useLOD: state.useLOD,
                 useTemporalCoherence: state.useTemporalCoherence,
                 usePredictiveCulling: state.usePredictiveCulling,
-                useInstancing: state.useInstancing,
                 qualityProfile: state.qualityProfile,
-                sceneSeed: state.sceneSeed,
             },
             renderer: renderer.capabilities,
         }, null, 2),
         'application/json'
     );
-    hud.showToast('Performance snapshot exported as JSON.');
+    showToast('Performance snapshot exported as JSON.');
 }
 
 function exportCameraPath() {
     if (!cameraPath.recordedPath?.samples?.length) {
-        hud.showToast('Record a camera path first.');
+        showToast('Record a camera path first.');
         return;
     }
     downloadText(`camera_path_${Date.now()}.json`, cameraPath.exportJSON(), 'application/json');
@@ -601,7 +444,7 @@ function exportCameraPath() {
 
 function exportBenchmark(format = 'json') {
     if (!benchmarkRunner.results.length && !benchmarkRunner.samples.length) {
-        hud.showToast('Run benchmark first.');
+        showToast('Run benchmark first.');
         return;
     }
     if (format === 'csv') {
@@ -612,94 +455,16 @@ function exportBenchmark(format = 'json') {
 }
 
 function startBenchmark() {
-    if (benchmarkMatrix.active) {
-        benchmarkMatrix.active = false;
-        benchmarkMatrix.queue = [];
-        benchmarkMatrix.runs = [];
-        benchmarkMatrix.current = null;
-    }
     if (!cameraPath.recordedPath?.samples?.length) {
-        hud.showToast('Record or import a camera path before benchmark.');
+        showToast('Record or import a camera path before benchmark.');
         return;
     }
     const technique = benchmarkRunner.start(cameraPath.recordedPath, {
         label: 'camera-benchmark',
         sceneLabel: state.environmentLabel,
-        sceneSeed: state.sceneSeed,
-        warmupFrames: 30,
     });
-    cameraPath.startReplay(cameraPath.recordedPath, {
-        loop: false,
-        smoothing: state.cameraPathSmoothing,
-        constantSpeed: state.cameraPathConstantSpeed,
-    });
-    hud.showToast(`Benchmark started with ${technique.label}.`);
-}
-
-function buildBenchmarkMatrixQueue() {
-    return [
-        { key: 'low', kind: 'complexity', level: 'low', seedOffset: 0 },
-        { key: 'medium', kind: 'complexity', level: 'medium', seedOffset: 17 },
-        { key: 'high', kind: 'complexity', level: 'high', seedOffset: 33 },
-        { key: 'voxel', kind: 'mode', mode: 'minecraft', target: 16000, seedOffset: 47 },
-        { key: 'dungeon', kind: 'mode', mode: 'dungeon', target: 14000, seedOffset: 61 },
-    ];
-}
-
-function launchNextMatrixBenchmark() {
-    const next = benchmarkMatrix.queue.shift();
-    if (!next) {
-        const payload = {
-            generatedAt: new Date().toISOString(),
-            path: cameraPath.recordedPath || null,
-            runs: benchmarkMatrix.runs,
-        };
-        downloadText(`benchmark_matrix_${Date.now()}.json`, JSON.stringify(payload, null, 2), 'application/json');
-        benchmarkMatrix.active = false;
-        benchmarkMatrix.current = null;
-        hud.showToast('Benchmark matrix complete. JSON exported.');
-        return;
-    }
-
-    benchmarkMatrix.current = next;
-    const seed = Number(state.sceneSeed) + Number(next.seedOffset || 0);
-    state.sceneSeed = seed;
-
-    if (next.kind === 'complexity') {
-        generateComplexityPreset(next.level);
-    } else {
-        state.mode = next.mode;
-        state.objectCount = next.target;
-        regenerateObjects();
-    }
-
-    const technique = benchmarkRunner.start(cameraPath.recordedPath, {
-        label: `matrix-${next.key}`,
-        sceneLabel: state.environmentLabel,
-        sceneSeed: seed,
-        warmupFrames: 30,
-    });
-    cameraPath.startReplay(cameraPath.recordedPath, {
-        loop: false,
-        smoothing: state.cameraPathSmoothing,
-        constantSpeed: state.cameraPathConstantSpeed,
-    });
-    hud.showToast(`Matrix run ${next.key} started (${technique.label}).`);
-}
-
-function startBenchmarkMatrix() {
-    if (benchmarkRunner.active) {
-        hud.showToast('Wait for current benchmark to finish first.');
-        return;
-    }
-    if (!cameraPath.recordedPath?.samples?.length) {
-        hud.showToast('Record or import a camera path before benchmark.');
-        return;
-    }
-    benchmarkMatrix.active = true;
-    benchmarkMatrix.runs = [];
-    benchmarkMatrix.queue = buildBenchmarkMatrixQueue();
-    launchNextMatrixBenchmark();
+    cameraPath.startReplay(cameraPath.recordedPath, { loop: false });
+    showToast(`Benchmark started with ${technique.label}.`);
 }
 
 function updateCameraMovement() {
@@ -765,9 +530,27 @@ function drawCullingDebug(decisions) {
     }
 }
 
+function updateStatsPanel(drawn, total, stageStats) {
+    const culled = Math.max(0, total - drawn);
+    const efficiency = total > 0 ? Math.round((culled / total) * 100) : 0;
+    const fps = perfMonitor.snapshot.fps;
+
+    document.getElementById('stat-fps').textContent = fps;
+    document.getElementById('stat-rendered').textContent = drawn.toLocaleString();
+    document.getElementById('stat-total').textContent = total.toLocaleString();
+    document.getElementById('stat-culled').textContent = culled.toLocaleString();
+    document.getElementById('stat-eff').textContent = `${efficiency}%`;
+    document.getElementById('stat-cF').textContent = (stageStats?.frustumCulled || 0).toLocaleString();
+    document.getElementById('stat-cO').textContent = (stageStats?.occlusionCulled || 0).toLocaleString();
+    document.getElementById('stat-cL').textContent = (stageStats?.lodCulled || 0).toLocaleString();
+
+    const fpsElement = document.getElementById('stat-fps');
+    fpsElement.style.color = fps >= 50 ? '#00ff88' : fps >= 30 ? '#ffcc00' : '#ff4444';
+}
+
 function effectiveState() {
     const benchmarkOverrides = benchmarkRunner.active && benchmarkRunner.currentTechnique
-        ? { ...benchmarkRunner.currentTechnique.state, useAdaptiveBudget: false, showHeatmap: false, showOcclusionGrid: false }
+        ? { ...benchmarkRunner.currentTechnique.state, useAdaptiveBudget: false, showHeatmap: false }
         : {};
     return { ...state, ...benchmarkOverrides };
 }
@@ -793,180 +576,12 @@ function renderGeneratedDecision(decision, runtimeState) {
     return mesh.indexCount || 0;
 }
 
-function renderGeneratedInstanced(decisions, runtimeState) {
-    if (!instancingAvailable || decisions.length === 0) {
-        return { renderedObjects: 0, vertexCount: 0 };
-    }
-
-    const batches = new Map();
-    const fallback = [];
-    for (const decision of decisions) {
-        const object = decision.object;
-        const mesh = object.mesh || (object.geometry ? getMeshForType(object.geometry) : activeMesh);
-        if (!mesh || mesh.hasColors) {
-            fallback.push(decision);
-            continue;
-        }
-        const key = object.geometry || 'cube';
-        if (!batches.has(key)) batches.set(key, { mesh, decisions: [] });
-        batches.get(key).decisions.push(decision);
-    }
-
-    let renderedObjects = 0;
-    let vertexCount = 0;
-    instancedShader.use();
-    gl.uniformMatrix4fv(instancedUniformLocations.view, false, camera.viewMatrix);
-    gl.uniformMatrix4fv(instancedUniformLocations.projection, false, camera.projectionMatrix);
-    gl.uniform3fv(instancedUniformLocations.lightDir, lightDirection);
-    gl.uniform1i(instancedUniformLocations.showLodColor, runtimeState.showLODColor ? 1 : 0);
-
-    const positionLocation = gl.getAttribLocation(instancedShader.program, 'aVertexPosition');
-    const normalLocation = gl.getAttribLocation(instancedShader.program, 'aVertexNormal');
-    const offsetLocation = gl.getAttribLocation(instancedShader.program, 'aInstanceOffset');
-    const colorLocation = gl.getAttribLocation(instancedShader.program, 'aInstanceColor');
-    const scaleVecLocation = gl.getAttribLocation(instancedShader.program, 'aInstanceScaleVec');
-    const scaleLocation = gl.getAttribLocation(instancedShader.program, 'aInstanceScale');
-    const rotationLocation = gl.getAttribLocation(instancedShader.program, 'aInstanceRotationY');
-    const lodLocation = gl.getAttribLocation(instancedShader.program, 'aInstanceLod');
-
-    for (const batch of batches.values()) {
-        const mesh = batch.mesh;
-        const items = batch.decisions;
-        if (!mesh?.vertexBuffer || !mesh?.normalBuffer || !mesh?.indexBuffer) {
-            fallback.push(...items);
-            continue;
-        }
-
-        const count = items.length;
-        if (count <= 0) continue;
-
-        const offsets = new Float32Array(count * 3);
-        const colors = new Float32Array(count * 3);
-        const scaleVecs = new Float32Array(count * 3);
-        const scales = new Float32Array(count);
-        const rotations = new Float32Array(count);
-        const lodLevels = new Float32Array(count);
-
-        for (let index = 0; index < count; index++) {
-            const decision = items[index];
-            const object = decision.object;
-            const offset = index * 3;
-            offsets[offset] = object.pos[0];
-            offsets[offset + 1] = object.pos[1];
-            offsets[offset + 2] = object.pos[2];
-            colors[offset] = object.color?.[0] ?? 0.2;
-            colors[offset + 1] = object.color?.[1] ?? 0.8;
-            colors[offset + 2] = object.color?.[2] ?? 1.0;
-            const scaleVec = object.scaleVec || [object.scale || 1, object.scale || 1, object.scale || 1];
-            scaleVecs[offset] = scaleVec[0];
-            scaleVecs[offset + 1] = scaleVec[1];
-            scaleVecs[offset + 2] = scaleVec[2];
-            scales[index] = decision.lod?.scale ?? 1;
-            rotations[index] = object.rotationY || 0;
-            lodLevels[index] = decision.lod?.level ?? 0;
-        }
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
-        gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(positionLocation);
-        setAttribDivisor(positionLocation, 0);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, mesh.normalBuffer);
-        gl.vertexAttribPointer(normalLocation, 3, gl.FLOAT, false, 0, 0);
-        gl.enableVertexAttribArray(normalLocation);
-        setAttribDivisor(normalLocation, 0);
-
-        const bindInstanceAttr = (buffer, location, size, values) => {
-            if (location < 0) return;
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, values, gl.DYNAMIC_DRAW);
-            gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
-            gl.enableVertexAttribArray(location);
-            setAttribDivisor(location, 1);
-        };
-
-        bindInstanceAttr(instancedBuffers.offset, offsetLocation, 3, offsets);
-        bindInstanceAttr(instancedBuffers.color, colorLocation, 3, colors);
-        bindInstanceAttr(instancedBuffers.scaleVec, scaleVecLocation, 3, scaleVecs);
-        bindInstanceAttr(instancedBuffers.scale, scaleLocation, 1, scales);
-        bindInstanceAttr(instancedBuffers.rotation, rotationLocation, 1, rotations);
-        bindInstanceAttr(instancedBuffers.lod, lodLocation, 1, lodLevels);
-
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
-        drawElementsInstanced(mesh.indexCount || 0, getMeshIndexType(mesh), count);
-
-        renderedObjects += count;
-        vertexCount += (mesh.indexCount || 0) * count;
-        perfMonitor.countDrawCall((mesh.indexCount || 0) * count);
-    }
-
-    for (const location of [offsetLocation, colorLocation, scaleVecLocation, scaleLocation, rotationLocation, lodLocation]) {
-        setAttribDivisor(location, 0);
-    }
-
-    for (const decision of fallback) {
-        const renderedVertices = renderGeneratedDecision(decision, runtimeState);
-        perfMonitor.countDrawCall(renderedVertices);
-        renderedObjects++;
-        vertexCount += renderedVertices;
-    }
-
-    return { renderedObjects, vertexCount };
-}
-
-function drawOcclusionOverlay(runtimeState) {
-    if (!runtimeState.showOcclusionGrid || !occlusionOverlayCtx) {
-        occlusionOverlay.style.display = 'none';
-        return;
-    }
-
-    const snapshot = occlusion.getDepthGridSnapshot?.();
-    if (!snapshot?.values?.length) {
-        occlusionOverlay.style.display = 'none';
-        return;
-    }
-    occlusionOverlay.style.display = 'block';
-
-    const resolution = snapshot.resolution || 1;
-    const values = snapshot.values;
-    const cellW = occlusionOverlay.width / resolution;
-    const cellH = occlusionOverlay.height / resolution;
-    let minDepth = Infinity;
-    let maxDepth = -Infinity;
-    for (const value of values) {
-        if (!Number.isFinite(value)) continue;
-        if (value < minDepth) minDepth = value;
-        if (value > maxDepth) maxDepth = value;
-    }
-    const span = Math.max(0.0001, maxDepth - minDepth);
-
-    occlusionOverlayCtx.clearRect(0, 0, occlusionOverlay.width, occlusionOverlay.height);
-    for (let y = 0; y < resolution; y++) {
-        for (let x = 0; x < resolution; x++) {
-            const depth = values[y * resolution + x];
-            if (!Number.isFinite(depth)) {
-                occlusionOverlayCtx.fillStyle = 'rgba(25,30,40,0.7)';
-            } else {
-                const t = Math.max(0, Math.min(1, (depth - minDepth) / span));
-                const r = Math.round(30 + (1 - t) * 225);
-                const g = Math.round(40 + t * 170);
-                const b = Math.round(80 + t * 120);
-                occlusionOverlayCtx.fillStyle = `rgba(${r},${g},${b},0.92)`;
-            }
-            occlusionOverlayCtx.fillRect(x * cellW, y * cellH, Math.ceil(cellW), Math.ceil(cellH));
-        }
-    }
-}
-
 function importPath(raw) {
     try {
         cameraPath.importJSON(raw);
-        state.cameraPathSmoothing = !!cameraPath.replaySmoothing;
-        state.cameraPathConstantSpeed = !!cameraPath.replayConstantSpeed;
-        researchPanel.syncState(state);
-        hud.showToast('Camera path imported.');
+        showToast('Camera path imported.');
     } catch (error) {
-        hud.showToast(error.message);
+        showToast(error.message);
     }
 }
 
@@ -974,9 +589,9 @@ function updateResearchPanel(runtimeState, stageStats) {
     const pathStatus = cameraPath.getStatus();
     const benchmarkStatus = benchmarkRunner.getStatus();
     researchPanel.updateStatus({
-        path: `${pathStatus.mode} | ${pathStatus.sampleCount} samples | ${pathStatus.smoothing ? 'smooth' : 'raw'} | ${pathStatus.constantSpeed ? 'const-speed' : 'time-native'}`,
+        path: `${pathStatus.mode} | ${pathStatus.sampleCount} samples`,
         benchmark: benchmarkStatus.active
-            ? `${benchmarkStatus.currentTechnique || 'running'} (${benchmarkStatus.warmupFrames || 0} warmup)`
+            ? benchmarkStatus.currentTechnique || 'running'
             : benchmarkStatus.completed
                 ? 'completed'
                 : 'idle',
@@ -1018,38 +633,151 @@ document.addEventListener('mousemove', event => {
     camera.pitch -= event.movementY * (turnSpeed * 0.07);
 });
 
-mountUI({
-    state,
-    leftPanel,
-    researchPanel,
-    importPanel,
-    chartPanel,
-    modelImporter,
-    cameraPath,
-    showToast: message => hud.showToast(message),
-    syncImportedRegistry,
-    syncSceneUI,
-    setGeometryType,
-    regenerateObjects,
-    generateComplexityPreset,
-    clearGeneratedScene,
-    exportPerformanceJSON,
-    exportCameraPath,
-    importPath,
-    startBenchmark,
-    startBenchmarkMatrix,
-    exportBenchmark,
-    setCameraSpeed: value => {
-        speed = value;
-    },
-    setCameraTurnSpeed: value => {
-        turnSpeed = value;
-    },
-});
+modelImporter.onLoad = (filename, meta, autoScale) => {
+    importPanel.setModelLoaded(filename, meta);
+    if (autoScale != null) importPanel.syncScale(autoScale);
+    showToast(`"${filename}" loaded into scene.`);
+};
+modelImporter.onError = message => showToast(message);
+modelImporter.onProgress = percent => importPanel.setProgress(percent);
+modelImporter.onRegistryChange = (objects, event) => {
+    syncImportedRegistry(objects, event?.selectedId ?? null);
+    syncSceneUI();
+};
 
-regenerateObjects();
-syncSceneUI();
-hud.updateStats({ fps: 0, drawn: 0, total: 0, stageStats: null });
+window.addEventListener('DOMContentLoaded', () => {
+    const bindToggle = (id, key) => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.checked = state[key];
+        element.addEventListener('change', event => {
+            state[key] = event.target.checked;
+        });
+    };
+
+    bindToggle('toggleFrustum', 'useFrustum');
+    bindToggle('toggleOctree', 'useOctree');
+    bindToggle('toggleOcclusion', 'useOcclusion');
+    bindToggle('toggleLOD', 'useLOD');
+    bindToggle('toggleBBox', 'showBBox');
+    bindToggle('toggleLODColor', 'showLODColor');
+
+    const slider = document.getElementById('obj-slider');
+    if (slider) {
+        slider.value = state.objectCount;
+        let debounceTimer = null;
+        slider.addEventListener('input', event => {
+            state.objectCount = parseInt(event.target.value, 10) || 0;
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => regenerateObjects(), 350);
+        });
+        slider.addEventListener('change', event => {
+            state.objectCount = parseInt(event.target.value, 10) || 0;
+            regenerateObjects();
+        });
+    }
+
+    document.getElementById('btn-generate')?.addEventListener('click', regenerateObjects);
+    document.getElementById('sel-mode')?.addEventListener('change', event => {
+        state.mode = event.target.value;
+    });
+    document.getElementById('sel-palette')?.addEventListener('change', event => {
+        state.paletteIdx = parseInt(event.target.value, 10) || 0;
+    });
+    document.getElementById('btn-perf')?.addEventListener('click', () => chartPanel.toggle());
+
+    leftPanel.mount({
+        onObjType: type => {
+            setGeometryType(type);
+            showToast(`Geometry changed to ${type.toUpperCase()}.`);
+        },
+        onObjCount: count => {
+            state.objectCount = count;
+            regenerateObjects();
+        },
+        onMode: mode => {
+            state.mode = mode;
+        },
+        onPalette: index => {
+            state.paletteIdx = index;
+        },
+        onGenerate: regenerateObjects,
+        onGenerateEnvironment: () => generateComplexityPreset(state.complexity),
+        onClearGeneratedScene: clearGeneratedScene,
+        onStateChange: (key, value) => {
+            state[key] = value;
+            const rightMap = {
+                useFrustum: 'toggleFrustum',
+                useOctree: 'toggleOctree',
+                useOcclusion: 'toggleOcclusion',
+                useLOD: 'toggleLOD',
+                showBBox: 'toggleBBox',
+                showLODColor: 'toggleLODColor',
+            };
+            const element = document.getElementById(rightMap[key]);
+            if (element) element.checked = value;
+            researchPanel.syncState(state);
+        },
+        onExportJSON: exportPerformanceJSON,
+        onChartPanel: () => chartPanel.toggle(),
+        onCameraSpeed: value => {
+            speed = value;
+        },
+        onCameraTurnSpeed: value => {
+            turnSpeed = value;
+        },
+    });
+
+    researchPanel.mount({
+        onToggleState: (key, value) => {
+            state[key] = value;
+            researchPanel.syncState(state);
+        },
+        onGenerateComplexity: level => generateComplexityPreset(level),
+        onRecord: () => {
+            cameraPath.startRecording(`${state.environmentLabel}-${Date.now()}`);
+            showToast('Camera path recording started.');
+        },
+        onStopRecord: () => {
+            cameraPath.stopRecording();
+            showToast('Camera path recording stopped.');
+        },
+        onReplay: () => {
+            if (!cameraPath.startReplay()) showToast('No camera path available.');
+        },
+        onExportPath: exportCameraPath,
+        onImportPath: importPath,
+        onStartBenchmark: startBenchmark,
+        onExportBenchmark: exportBenchmark,
+    });
+    researchPanel.syncState(state);
+
+    importPanel.mount({
+        onUpload: files => modelImporter.loadFiles(files),
+        onRemove: () => {
+            modelImporter.remove();
+            if (modelImporter.objects.length === 0) importPanel.reset();
+            showToast('Imported model removed.');
+        },
+        onInstanceCount: count => modelImporter.setInstanceCount(count),
+        onScale: ({ x, y, z }) => modelImporter.setScale(x, y, z),
+        onSelectObject: id => modelImporter.select(id),
+        onDuplicateObject: async id => {
+            const newId = await modelImporter.duplicate(id);
+            if (newId) showToast('Imported object duplicated.');
+        },
+        onRemoveObject: id => {
+            modelImporter.remove(id);
+            if (modelImporter.objects.length === 0) importPanel.reset();
+            showToast('Imported object removed.');
+        },
+        onError: message => showToast(message),
+    });
+
+    regenerateObjects();
+    syncSceneUI();
+    updateStatsPanel(0, 0, null);
+});
 
 function gameLoop() {
     perfMonitor.beginFrame();
@@ -1071,13 +799,6 @@ function gameLoop() {
     adaptiveQuality.update(perfMonitor.snapshot, state, occlusion, lod);
 
     const runtimeState = effectiveState();
-    if (!runtimeState.useAdaptiveBudget) {
-        occlusion.setResolution?.(runtimeState.occlusionResolution || 24);
-    }
-    lod.nearThreshold = Math.max(20, Number(runtimeState.lodNear) || lod.nearThreshold);
-    lod.midThreshold = Math.max(lod.nearThreshold + 20, Number(runtimeState.lodMid) || lod.midThreshold);
-    lod.farThreshold = Math.max(lod.midThreshold + 20, Number(runtimeState.lodFar) || lod.farThreshold);
-    lod.transitionBand = Math.max(4, Number(runtimeState.lodTransitionBand) || lod.transitionBand);
     lod.enabled = runtimeState.useLOD;
     occlusion.enabled = runtimeState.useOcclusion;
 
@@ -1093,7 +814,6 @@ function gameLoop() {
     let drawnObjects = 0;
     let vertexCount = 0;
     const visibleImportedIds = new Set();
-    const generatedVisible = [];
 
     for (const decision of pipelineResult.visible) {
         if (decision.object.cullingSource === 'imported') {
@@ -1102,27 +822,14 @@ function gameLoop() {
             vertexCount += Math.round((decision.object.bounds?.radius || 1) * 120);
             continue;
         }
-        generatedVisible.push(decision);
+
+        const renderedVertices = renderGeneratedDecision(decision, runtimeState);
+        perfMonitor.countDrawCall(renderedVertices);
+        vertexCount += renderedVertices;
+        drawnObjects++;
     }
 
-    const generatedRender = runtimeState.useInstancing && instancingAvailable
-        ? renderGeneratedInstanced(generatedVisible, runtimeState)
-        : (() => {
-            let renderedObjects = 0;
-            let vertices = 0;
-            for (const decision of generatedVisible) {
-                const renderedVertices = renderGeneratedDecision(decision, runtimeState);
-                perfMonitor.countDrawCall(renderedVertices);
-                vertices += renderedVertices;
-                renderedObjects++;
-            }
-            return { renderedObjects, vertexCount: vertices };
-        })();
-    drawnObjects += generatedRender.renderedObjects;
-    vertexCount += generatedRender.vertexCount;
-
     drawCullingDebug(pipelineResult.decisions);
-    drawOcclusionOverlay(runtimeState);
     modelImporter.syncCamera(camera, visibleImportedIds);
 
     const totalSceneObjects = getSceneObjectCount();
@@ -1136,6 +843,7 @@ function gameLoop() {
 
     if (benchmarkRunner.active && benchmarkRunner.currentTechnique) {
         benchmarkRunner.captureFrame({
+            frameIndex: benchmarkRunner.currentTechnique.frames.length,
             elapsedMs: Math.round(now - benchmarkRunner.currentTechnique.startedAt),
             fps: perfMonitor.snapshot.fps,
             cpuFrameMs: perfMonitor.snapshot.cpuFrameMs,
@@ -1159,31 +867,14 @@ function gameLoop() {
         const finished = benchmarkRunner.finalizeCurrentTechnique();
         const nextTechnique = benchmarkRunner.nextTechnique();
         if (nextTechnique) {
-            cameraPath.startReplay(cameraPath.recordedPath, {
-                loop: false,
-                smoothing: state.cameraPathSmoothing,
-                constantSpeed: state.cameraPathConstantSpeed,
-            });
-            hud.showToast(`Benchmark switching to ${nextTechnique.label}. Avg FPS previous: ${finished.avgFps}`);
+            cameraPath.startReplay(cameraPath.recordedPath, { loop: false });
+            showToast(`Benchmark switching to ${nextTechnique.label}. Avg FPS previous: ${finished.avgFps}`);
         } else {
-            if (benchmarkMatrix.active) {
-                benchmarkMatrix.runs.push({
-                    scene: benchmarkMatrix.current,
-                    result: JSON.parse(benchmarkRunner.exportJSON()),
-                });
-                launchNextMatrixBenchmark();
-            } else {
-                hud.showToast('Benchmark completed. Export JSON or CSV from Research Lab.');
-            }
+            showToast('Benchmark completed. Export JSON or CSV from Research Lab.');
         }
     }
 
-    hud.updateStats({
-        fps: perfMonitor.snapshot.fps,
-        drawn: drawnObjects,
-        total: totalSceneObjects,
-        stageStats: pipelineResult.stageStats,
-    });
+    updateStatsPanel(drawnObjects, totalSceneObjects, pipelineResult.stageStats);
     chartPanel.update(perfMonitor, runtimeState);
     leftPanel.updatePerf(perfMonitor.snapshot, camera, drawnObjects, totalCulled, totalSceneObjects);
     updateResearchPanel(runtimeState, pipelineResult.stageStats);
