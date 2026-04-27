@@ -12,6 +12,29 @@ const HTML = `
     <label class="rp-toggle-row"><span>Predictive Culling</span><input type="checkbox" id="rp-predictive" checked></label>
     <label class="rp-toggle-row"><span>Adaptive Budget</span><input type="checkbox" id="rp-budget"></label>
     <label class="rp-toggle-row"><span>Heatmap Overlay</span><input type="checkbox" id="rp-heatmap"></label>
+    <label class="rp-toggle-row"><span>Instancing Path</span><input type="checkbox" id="rp-instancing" checked></label>
+    <label class="rp-toggle-row"><span>Occlusion Grid Overlay</span><input type="checkbox" id="rp-occlusion-overlay"></label>
+  </section>
+
+  <section class="rp-section">
+    <div class="rp-label">Occlusion Tuning</div>
+    <label class="rp-range-row">
+      <span>Grid Resolution</span>
+      <strong id="rp-occlusion-res-label">24</strong>
+    </label>
+    <input type="range" id="rp-occlusion-res" min="8" max="64" step="2" value="24">
+  </section>
+
+  <section class="rp-section">
+    <div class="rp-label">LOD Thresholds</div>
+    <label class="rp-range-row"><span>Near</span><strong id="rp-lod-near-label">150</strong></label>
+    <input type="range" id="rp-lod-near" min="40" max="300" step="5" value="150">
+    <label class="rp-range-row"><span>Mid</span><strong id="rp-lod-mid-label">350</strong></label>
+    <input type="range" id="rp-lod-mid" min="120" max="600" step="5" value="350">
+    <label class="rp-range-row"><span>Far</span><strong id="rp-lod-far-label">600</strong></label>
+    <input type="range" id="rp-lod-far" min="220" max="1000" step="10" value="600">
+    <label class="rp-range-row"><span>Transition Band</span><strong id="rp-lod-band-label">45</strong></label>
+    <input type="range" id="rp-lod-band" min="10" max="140" step="1" value="45">
   </section>
 
   <section class="rp-section">
@@ -21,11 +44,17 @@ const HTML = `
       <option value="medium" selected>Medium</option>
       <option value="high">High</option>
     </select>
+    <div class="rp-inline-row">
+      <input type="number" id="rp-scene-seed" min="0" max="999999999" step="1" value="1337" />
+      <button class="rp-btn" id="rp-random-seed">Random Seed</button>
+    </div>
     <button class="rp-btn" id="rp-generate-complexity">Generate Preset Scene</button>
   </section>
 
   <section class="rp-section">
     <div class="rp-label">Camera Path</div>
+    <label class="rp-toggle-row"><span>Smoothing Replay</span><input type="checkbox" id="rp-path-smoothing" checked></label>
+    <label class="rp-toggle-row"><span>Constant Speed Replay</span><input type="checkbox" id="rp-path-constant" checked></label>
     <div class="rp-btn-row">
       <button class="rp-btn" id="rp-record">Record</button>
       <button class="rp-btn" id="rp-stop-record">Stop</button>
@@ -41,6 +70,7 @@ const HTML = `
   <section class="rp-section">
     <div class="rp-label">Benchmark</div>
     <button class="rp-btn rp-btn-accent" id="rp-start-benchmark">Run 6-Technique Benchmark</button>
+    <button class="rp-btn" id="rp-start-benchmark-matrix">Run Matrix (Low/Med/High/Voxel/Dungeon)</button>
     <div class="rp-btn-row">
       <button class="rp-btn" id="rp-export-benchmark-json">Export JSON</button>
       <button class="rp-btn" id="rp-export-benchmark-csv">Export CSV</button>
@@ -79,7 +109,7 @@ const CSS = `
   position: fixed;
   right: 18px;
   bottom: 64px;
-  width: 300px;
+  width: 320px;
   max-height: calc(100vh - 96px);
   overflow-y: auto;
   z-index: 129;
@@ -134,7 +164,8 @@ const CSS = `
 }
 
 .rp-toggle-row,
-.rp-stat {
+.rp-stat,
+.rp-range-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -143,13 +174,15 @@ const CSS = `
   font-size: 12px;
 }
 
-.rp-stat strong {
+.rp-stat strong,
+.rp-range-row strong {
   color: #f4f8fb;
   font: 600 11px 'Share Tech Mono', monospace;
 }
 
 .rp-btn,
-#research-panel select {
+#research-panel select,
+#research-panel input[type=number] {
   width: 100%;
   border: 1px solid rgba(124, 242, 255, 0.18);
   border-radius: 10px;
@@ -157,6 +190,18 @@ const CSS = `
   color: #cbe2ef;
   padding: 9px 10px;
   font: 12px 'Exo 2', sans-serif;
+}
+
+#research-panel input[type=range] {
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.rp-inline-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .rp-btn {
@@ -210,11 +255,49 @@ export class ResearchPanel {
             'rp-predictive': 'usePredictiveCulling',
             'rp-budget': 'useAdaptiveBudget',
             'rp-heatmap': 'showHeatmap',
+            'rp-instancing': 'useInstancing',
+            'rp-occlusion-overlay': 'showOcclusionGrid',
         };
         Object.entries(boolMap).forEach(([id, key]) => {
             document.getElementById(id)?.addEventListener('change', event => {
                 this.callbacks.onToggleState?.(key, event.target.checked);
             });
+        });
+
+        this._bindRange('rp-occlusion-res', 'rp-occlusion-res-label', value => {
+            this.callbacks.onSetOcclusionResolution?.(value);
+        }, value => String(Math.round(value)));
+        this._bindRange('rp-lod-near', 'rp-lod-near-label', value => {
+            this.callbacks.onSetLodThresholds?.({ near: value });
+        }, value => String(Math.round(value)));
+        this._bindRange('rp-lod-mid', 'rp-lod-mid-label', value => {
+            this.callbacks.onSetLodThresholds?.({ mid: value });
+        }, value => String(Math.round(value)));
+        this._bindRange('rp-lod-far', 'rp-lod-far-label', value => {
+            this.callbacks.onSetLodThresholds?.({ far: value });
+        }, value => String(Math.round(value)));
+        this._bindRange('rp-lod-band', 'rp-lod-band-label', value => {
+            this.callbacks.onSetLodThresholds?.({ transitionBand: value });
+        }, value => String(Math.round(value)));
+
+        const notifyReplayOptions = () => {
+            const smoothing = !!document.getElementById('rp-path-smoothing')?.checked;
+            const constantSpeed = !!document.getElementById('rp-path-constant')?.checked;
+            this.callbacks.onSetReplayOptions?.({ smoothing, constantSpeed });
+        };
+        document.getElementById('rp-path-smoothing')?.addEventListener('change', notifyReplayOptions);
+        document.getElementById('rp-path-constant')?.addEventListener('change', notifyReplayOptions);
+        notifyReplayOptions();
+
+        const seedInput = document.getElementById('rp-scene-seed');
+        seedInput?.addEventListener('change', () => {
+            const parsed = Number.parseInt(seedInput.value, 10);
+            if (Number.isFinite(parsed)) this.callbacks.onSetSceneSeed?.(parsed);
+        });
+        document.getElementById('rp-random-seed')?.addEventListener('click', () => {
+            const seed = Math.floor(Math.random() * 1_000_000_000);
+            if (seedInput) seedInput.value = String(seed);
+            this.callbacks.onSetSceneSeed?.(seed);
         });
 
         document.getElementById('rp-generate-complexity')?.addEventListener('click', () => {
@@ -227,6 +310,7 @@ export class ResearchPanel {
         document.getElementById('rp-replay')?.addEventListener('click', () => this.callbacks.onReplay?.());
         document.getElementById('rp-export-path')?.addEventListener('click', () => this.callbacks.onExportPath?.());
         document.getElementById('rp-start-benchmark')?.addEventListener('click', () => this.callbacks.onStartBenchmark?.());
+        document.getElementById('rp-start-benchmark-matrix')?.addEventListener('click', () => this.callbacks.onStartBenchmarkMatrix?.());
         document.getElementById('rp-export-benchmark-json')?.addEventListener('click', () => this.callbacks.onExportBenchmark?.('json'));
         document.getElementById('rp-export-benchmark-csv')?.addEventListener('click', () => this.callbacks.onExportBenchmark?.('csv'));
 
@@ -247,11 +331,24 @@ export class ResearchPanel {
             'rp-predictive': !!state.usePredictiveCulling,
             'rp-budget': !!state.useAdaptiveBudget,
             'rp-heatmap': !!state.showHeatmap,
+            'rp-instancing': !!state.useInstancing,
+            'rp-occlusion-overlay': !!state.showOcclusionGrid,
+            'rp-path-smoothing': !!state.cameraPathSmoothing,
+            'rp-path-constant': !!state.cameraPathConstantSpeed,
         };
         Object.entries(map).forEach(([id, value]) => {
             const element = document.getElementById(id);
             if (element) element.checked = value;
         });
+
+        this._setRange('rp-occlusion-res', 'rp-occlusion-res-label', state.occlusionResolution, value => String(Math.round(value)));
+        this._setRange('rp-lod-near', 'rp-lod-near-label', state.lodNear, value => String(Math.round(value)));
+        this._setRange('rp-lod-mid', 'rp-lod-mid-label', state.lodMid, value => String(Math.round(value)));
+        this._setRange('rp-lod-far', 'rp-lod-far-label', state.lodFar, value => String(Math.round(value)));
+        this._setRange('rp-lod-band', 'rp-lod-band-label', state.lodTransitionBand, value => String(Math.round(value)));
+
+        const seedInput = document.getElementById('rp-scene-seed');
+        if (seedInput && Number.isFinite(state.sceneSeed)) seedInput.value = String(Math.floor(state.sceneSeed));
     }
 
     updateStatus(status = {}) {
@@ -264,5 +361,26 @@ export class ResearchPanel {
         setText('rp-quality-status', status.quality || 'high');
         setText('rp-stage-status', status.stageMs || '0 / 0 / 0 / 0');
         setText('rp-hybrid-status', status.hybrid || '0 / 0');
+    }
+
+    _bindRange(id, labelId, onChange, format = value => String(value)) {
+        const input = document.getElementById(id);
+        const label = document.getElementById(labelId);
+        if (!input) return;
+        const apply = raw => {
+            const value = Number.parseFloat(raw);
+            if (!Number.isFinite(value)) return;
+            if (label) label.textContent = format(value);
+            onChange?.(value);
+        };
+        input.addEventListener('input', event => apply(event.target.value));
+        apply(input.value);
+    }
+
+    _setRange(id, labelId, value, format = v => String(v)) {
+        const input = document.getElementById(id);
+        const label = document.getElementById(labelId);
+        if (input && Number.isFinite(value)) input.value = String(value);
+        if (label && Number.isFinite(value)) label.textContent = format(value);
     }
 }
