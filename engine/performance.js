@@ -49,6 +49,7 @@ export class PerformanceMonitor {
             cpuFrameMs: makeRingBuffer(HISTORY_SIZE),
             gpuFrameMs: makeRingBuffer(HISTORY_SIZE),
             heapMB: makeRingBuffer(HISTORY_SIZE),
+            ramMB: makeRingBuffer(HISTORY_SIZE),
             drawCalls: makeRingBuffer(HISTORY_SIZE),
             rendered: makeRingBuffer(HISTORY_SIZE),
             culledTotal: makeRingBuffer(HISTORY_SIZE),
@@ -69,6 +70,18 @@ export class PerformanceMonitor {
         this._gpuQuery = null;
         this._gpuPending = false;
         this._lastGpuMs = 0;
+        this._memoryApiSupported = typeof performance.measureUserAgentSpecificMemory === 'function';
+        this._memorySamplePending = false;
+        this._lastMemorySampleAt = 0;
+        this._memorySampleIntervalMs = 1000;
+        this._deviceMemoryMB = typeof navigator !== 'undefined' && typeof navigator.deviceMemory === 'number'
+            ? Math.round(navigator.deviceMemory * 1024)
+            : 0;
+        this._lastRamMB = 0;
+        this._lastRamLimitMB = this._deviceMemoryMB;
+        this._lastRamSource = this._memoryApiSupported
+            ? 'Checking'
+            : (performance.memory ? 'JS heap fallback' : 'Unavailable');
 
         this.snapshot = {
             fps: 0,
@@ -76,6 +89,9 @@ export class PerformanceMonitor {
             gpuFrameMs: 0,
             heapMB: 0,
             heapLimit: 0,
+            ramMB: 0,
+            ramLimitMB: this._deviceMemoryMB,
+            ramSource: this._lastRamSource,
             drawCalls: 0,
             rendered: 0,
             culledTotal: 0,
@@ -86,6 +102,43 @@ export class PerformanceMonitor {
             stageStats: null,
             gpuSupported: !!timerSupport,
         };
+    }
+
+    _sampleRamUsage(heapMB, heapLimit) {
+        if (heapMB > 0 && (!this._lastRamMB || this._lastRamSource !== 'Page memory')) {
+            this._lastRamMB = Number(heapMB.toFixed(1));
+            this._lastRamLimitMB = Number(heapLimit.toFixed(0));
+            this._lastRamSource = 'JS heap fallback';
+        }
+
+        const now = performance.now();
+        if (!this._memoryApiSupported || this._memorySamplePending || (now - this._lastMemorySampleAt) < this._memorySampleIntervalMs) {
+            return;
+        }
+
+        this._memorySamplePending = true;
+        this._lastMemorySampleAt = now;
+
+        performance.measureUserAgentSpecificMemory()
+            .then(result => {
+                const ramMB = result?.bytes / 1048576;
+                if (!Number.isFinite(ramMB)) return;
+                this._lastRamMB = Number(ramMB.toFixed(1));
+                this._lastRamLimitMB = this._deviceMemoryMB || Number(heapLimit.toFixed(0));
+                this._lastRamSource = 'Page memory';
+            })
+            .catch(() => {
+                if (heapMB <= 0) {
+                    this._lastRamSource = 'Unavailable';
+                    return;
+                }
+                this._lastRamMB = Number(heapMB.toFixed(1));
+                this._lastRamLimitMB = Number(heapLimit.toFixed(0));
+                this._lastRamSource = 'JS heap fallback';
+            })
+            .finally(() => {
+                this._memorySamplePending = false;
+            });
     }
 
     beginFrame() {
@@ -146,6 +199,9 @@ export class PerformanceMonitor {
             heapMB = performance.memory.usedJSHeapSize / 1048576;
             heapLimit = performance.memory.jsHeapSizeLimit / 1048576;
         }
+        this._sampleRamUsage(heapMB, heapLimit);
+        const ramMB = this._lastRamMB || heapMB;
+        const ramLimitMB = this._lastRamLimitMB || Number(heapLimit.toFixed(0));
 
         this._frameCount++;
         const now = performance.now();
@@ -166,6 +222,7 @@ export class PerformanceMonitor {
         this.history.cpuFrameMs.push(Number(frameMs.toFixed(2)));
         this.history.gpuFrameMs.push(Number(this._lastGpuMs.toFixed(2)));
         this.history.heapMB.push(Number(heapMB.toFixed(1)));
+        this.history.ramMB.push(Number(ramMB.toFixed(1)));
         this.history.drawCalls.push(this._drawCallsThisFrame);
         this.history.rendered.push(rendered);
         this.history.culledTotal.push(culledTotal);
@@ -179,6 +236,9 @@ export class PerformanceMonitor {
             gpuFrameMs: Number(this._lastGpuMs.toFixed(2)),
             heapMB: Number(heapMB.toFixed(1)),
             heapLimit: Number(heapLimit.toFixed(0)),
+            ramMB: Number(ramMB.toFixed(1)),
+            ramLimitMB: Number(ramLimitMB),
+            ramSource: this._lastRamSource,
             drawCalls: this._drawCallsThisFrame,
             rendered,
             culledTotal,

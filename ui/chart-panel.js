@@ -1,17 +1,7 @@
 // ============================================================
-// ui/chart-panel.js  [BARU]
+// ui/chart-panel.js
 //
-// Dashboard performa real-time dengan Chart.js
-// Menampilkan 6 chart sekaligus:
-//   1. FPS over time
-//   2. CPU Frame Time (ms)
-//   3. GPU Frame Time (ms) — jika browser support
-//   4. JS Heap Memory (MB)
-//   5. Rendered vs Culled objects
-//   6. Culling Efficiency (%)
-//
-// + Summary card untuk nilai rata-rata, min, max
-// + Tombol Export CSV untuk keperluan penelitian
+// Performance dashboard overlay powered by Chart.js.
 // ============================================================
 
 const CHART_COLOR = {
@@ -19,10 +9,12 @@ const CHART_COLOR = {
     cpu:     { line: '#00c8ff', fill: 'rgba(0,200,255,0.08)' },
     gpu:     { line: '#7b2fff', fill: 'rgba(123,47,255,0.08)' },
     mem:     { line: '#ffe033', fill: 'rgba(255,224,51,0.08)' },
+    ram:     { line: '#ff8c42', fill: 'rgba(255,140,66,0.08)' },
     render:  { line: '#00c8ff', fill: 'rgba(0,200,255,0.08)' },
-    culled:  { line: '#ff4455', fill: 'rgba(255,68,85,0.08)'  },
-    eff:     { line: '#00ff88', fill: 'rgba(0,255,136,0.08)'  },
+    culled:  { line: '#ff4455', fill: 'rgba(255,68,85,0.08)' },
+    eff:     { line: '#00ff88', fill: 'rgba(0,255,136,0.08)' },
     budget:  { line: '#ffe033', fill: 'rgba(255,224,51,0.08)' },
+    ref:     { line: 'rgba(255,100,100,0.4)', fill: 'rgba(0,0,0,0)' },
 };
 
 const CHART_DEFAULTS = {
@@ -38,7 +30,7 @@ const CHART_DEFAULTS = {
             borderWidth: 1,
             titleColor: '#00c8ff',
             bodyColor: '#c8d8e8',
-        }
+        },
     },
     scales: {
         x: {
@@ -49,101 +41,117 @@ const CHART_DEFAULTS = {
             grid: { color: 'rgba(255,255,255,0.04)' },
             ticks: { color: '#5a7080', font: { family: 'Share Tech Mono', size: 10 } },
             border: { color: 'rgba(0,200,255,0.15)' },
-        }
+        },
     },
     elements: {
         point: { radius: 0 },
-        line:  { tension: 0.3, borderWidth: 1.5 },
-    }
+        line: { tension: 0.3, borderWidth: 1.5 },
+    },
 };
 
-function makeDataset(label, color, data = []) {
+function makeDataset(label, color, data = [], extra = {}) {
     return {
         label,
         data,
-        borderColor:     color.line,
+        borderColor: color.line,
         backgroundColor: color.fill,
-        fill:            true,
+        fill: true,
+        ...extra,
     };
 }
 
-// ============================================================
-// BUILD DOM
-// ============================================================
+function makeRefDataset(label, value) {
+    return {
+        label,
+        data: [],
+        borderColor: CHART_COLOR.ref.line,
+        backgroundColor: CHART_COLOR.ref.fill,
+        fill: false,
+        borderDash: [4, 4],
+        borderWidth: 1,
+        pointRadius: 0,
+        tension: 0,
+        referenceValue: value,
+    };
+}
+
 function buildPanelHTML() {
     return `
 <div id="perf-overlay">
   <div id="perf-panel">
-
-    <!-- Header -->
     <div class="perf-header">
       <div class="perf-title">
         <span class="perf-dot"></span>
         Performance Dashboard
       </div>
       <div class="perf-header-right">
-        <button class="perf-btn" id="perf-export-csv">⬇ Export CSV</button>
-        <button class="perf-btn perf-btn-json" id="perf-export-json">⬇ Export JSON</button>
-        <button class="perf-btn" id="perf-clear">⟳ Clear</button>
-        <button class="perf-close" id="perf-close">✕</button>
+        <button class="perf-btn" id="perf-export-csv">Export CSV</button>
+        <button class="perf-btn perf-btn-json" id="perf-export-json">Export JSON</button>
+        <button class="perf-btn" id="perf-clear">Clear</button>
+        <button class="perf-close" id="perf-close">Close</button>
       </div>
     </div>
 
-    <!-- Summary Cards -->
     <div class="perf-cards">
       <div class="perf-card" id="card-fps">
-        <div class="card-icon">⚡</div>
+        <div class="card-icon">FPS</div>
         <div class="card-body">
-          <div class="card-val" id="cval-fps">—</div>
+          <div class="card-val" id="cval-fps">--</div>
           <div class="card-lbl">FPS (avg)</div>
-          <div class="card-sub" id="csub-fps">min — / max —</div>
+          <div class="card-sub" id="csub-fps">min -- / max --</div>
         </div>
       </div>
       <div class="perf-card" id="card-cpu">
-        <div class="card-icon">🖥</div>
+        <div class="card-icon">CPU</div>
         <div class="card-body">
-          <div class="card-val" id="cval-cpu">—</div>
+          <div class="card-val" id="cval-cpu">--</div>
           <div class="card-lbl">CPU Frame (ms)</div>
-          <div class="card-sub" id="csub-cpu">min — / max —</div>
+          <div class="card-sub" id="csub-cpu">min -- / max --</div>
         </div>
       </div>
       <div class="perf-card" id="card-gpu">
-        <div class="card-icon">🎮</div>
+        <div class="card-icon">GPU</div>
         <div class="card-body">
-          <div class="card-val" id="cval-gpu">—</div>
+          <div class="card-val" id="cval-gpu">--</div>
           <div class="card-lbl">GPU Frame (ms)</div>
           <div class="card-sub" id="csub-gpu">EXT_disjoint_timer</div>
         </div>
       </div>
       <div class="perf-card" id="card-mem">
-        <div class="card-icon">💾</div>
+        <div class="card-icon">MEM</div>
         <div class="card-body">
-          <div class="card-val" id="cval-mem">—</div>
+          <div class="card-val" id="cval-mem">--</div>
           <div class="card-lbl">JS Heap (MB)</div>
-          <div class="card-sub" id="csub-mem">limit —</div>
+          <div class="card-sub" id="csub-mem">limit --</div>
+        </div>
+      </div>
+      <div class="perf-card" id="card-ram">
+        <div class="card-icon">RAM</div>
+        <div class="card-body">
+          <div class="card-val" id="cval-ram">--</div>
+          <div class="card-lbl">RAM Usage (MB)</div>
+          <div class="card-sub" id="csub-ram">source --</div>
         </div>
       </div>
       <div class="perf-card" id="card-dc">
-        <div class="card-icon">📐</div>
+        <div class="card-icon">DC</div>
         <div class="card-body">
-          <div class="card-val" id="cval-dc">—</div>
+          <div class="card-val" id="cval-dc">--</div>
           <div class="card-lbl">Draw Calls</div>
           <div class="card-sub" id="csub-dc">per frame</div>
         </div>
       </div>
       <div class="perf-card" id="card-eff">
-        <div class="card-icon">✂</div>
+        <div class="card-icon">EFF</div>
         <div class="card-body">
-          <div class="card-val" id="cval-eff">—</div>
+          <div class="card-val" id="cval-eff">--</div>
           <div class="card-lbl">Cull Efficiency</div>
           <div class="card-sub" id="csub-eff">% objects culled</div>
         </div>
       </div>
     </div>
 
-    <!-- Charts Grid -->
     <div class="perf-charts">
-
       <div class="chart-box">
         <div class="chart-title">FPS <span class="chart-unit">frames/sec</span></div>
         <div class="chart-wrap"><canvas id="ch-fps"></canvas></div>
@@ -151,14 +159,14 @@ function buildPanelHTML() {
 
       <div class="chart-box">
         <div class="chart-title">CPU Frame Time <span class="chart-unit">ms</span>
-          <span class="chart-ref">— 16.67ms = 60fps target</span>
+          <span class="chart-ref">target 16.67ms = 60fps</span>
         </div>
         <div class="chart-wrap"><canvas id="ch-cpu"></canvas></div>
       </div>
 
       <div class="chart-box">
         <div class="chart-title">GPU Frame Time <span class="chart-unit">ms</span>
-          <span id="gpu-badge" class="chart-badge">checking…</span>
+          <span id="gpu-badge" class="chart-badge">checking...</span>
         </div>
         <div class="chart-wrap"><canvas id="ch-gpu"></canvas></div>
       </div>
@@ -168,24 +176,29 @@ function buildPanelHTML() {
         <div class="chart-wrap"><canvas id="ch-mem"></canvas></div>
       </div>
 
-      <div class="chart-box chart-wide">
-        <div class="chart-title">Rendered vs Culled Objects <span class="chart-unit">count</span></div>
-        <div class="chart-wrap"><canvas id="ch-objs"></canvas></div>
-      </div>
-
       <div class="chart-box">
         <div class="chart-title">Culling Efficiency <span class="chart-unit">%</span></div>
         <div class="chart-wrap"><canvas id="ch-eff"></canvas></div>
       </div>
 
       <div class="chart-box">
+        <div class="chart-title">RAM Usage <span class="chart-unit">MB</span>
+          <span id="ram-badge" class="chart-badge">checking...</span>
+        </div>
+        <div class="chart-wrap"><canvas id="ch-ram"></canvas></div>
+      </div>
+
+      <div class="chart-box chart-wide">
+        <div class="chart-title">Rendered vs Culled Objects <span class="chart-unit">count</span></div>
+        <div class="chart-wrap"><canvas id="ch-objs"></canvas></div>
+      </div>
+
+      <div class="chart-box">
         <div class="chart-title">Frame Time Budget <span class="chart-unit">% of 16.67ms</span></div>
         <div class="chart-wrap"><canvas id="ch-budget"></canvas></div>
       </div>
+    </div>
 
-    </div><!-- /perf-charts -->
-
-    <!-- Active Method Tags -->
     <div class="perf-footer">
       <span class="foot-label">Active Methods:</span>
       <span class="method-tag" id="mtag-frustum">Frustum</span>
@@ -193,24 +206,27 @@ function buildPanelHTML() {
       <span class="method-tag" id="mtag-occlusion">Occlusion</span>
       <span class="method-tag" id="mtag-lod">LOD</span>
     </div>
-
-  </div><!-- /perf-panel -->
-</div><!-- /perf-overlay -->
+  </div>
+</div>
 `;
 }
 
-// ============================================================
-// ChartPanel class
-// ============================================================
+function csvEscape(value) {
+    const text = String(value ?? '');
+    if (!/[",\n]/.test(text)) return text;
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
 export class ChartPanel {
     constructor() {
-        this.visible  = false;
-        this.charts   = {};
-        this._csvRows = []; // Untuk export CSV
+        this.visible = false;
+        this.charts = {};
+        this._csvRows = [];
         this._injected = false;
+        this._lastPerfMonitor = null;
+        this._lastActiveState = null;
     }
 
-    // Inject DOM dan inisialisasi chart
     init() {
         if (this._injected) return;
         document.body.insertAdjacentHTML('beforeend', buildPanelHTML());
@@ -222,97 +238,136 @@ export class ChartPanel {
 
     toggle() {
         if (!this._injected) this.init();
-        const el = document.getElementById('perf-overlay');
-        if (!el) return;
+        const overlay = document.getElementById('perf-overlay');
+        if (!overlay) return;
+
         this.visible = !this.visible;
-        el.classList.toggle('perf-visible', this.visible);
-        if (this.visible) this._refreshAll();
+        overlay.classList.toggle('perf-visible', this.visible);
+
+        if (this.visible) {
+            requestAnimationFrame(() => {
+                this._resizeCharts();
+                if (this._lastPerfMonitor && this._lastActiveState) {
+                    this.update(this._lastPerfMonitor, this._lastActiveState);
+                } else {
+                    this._refreshAll();
+                }
+            });
+        }
     }
 
     close() {
         this.visible = false;
-        const el = document.getElementById('perf-overlay');
-        if (el) el.classList.remove('perf-visible');
+        const overlay = document.getElementById('perf-overlay');
+        if (overlay) overlay.classList.remove('perf-visible');
     }
 
-    // Dipanggil dari main.js setiap update stats (500ms)
     update(perfMonitor, activeState) {
+        this._lastPerfMonitor = perfMonitor;
+        this._lastActiveState = activeState;
         if (!this._injected) return;
 
         const { history, snapshot } = perfMonitor.getChartData();
 
-        // Update summary cards
-        this._card('fps',  history.fps.avg().toFixed(0),
-            `min ${history.fps.min()} / max ${history.fps.max()}`);
-        this._card('cpu',  history.cpuFrameMs.avg().toFixed(2) + ' ms',
-            `min ${history.cpuFrameMs.min()} / max ${history.cpuFrameMs.max().toFixed(2)}`);
+        this._card('fps', history.fps.avg().toFixed(0), `min ${history.fps.min()} / max ${history.fps.max()}`);
+        this._card(
+            'cpu',
+            `${history.cpuFrameMs.avg().toFixed(2)} ms`,
+            `min ${history.cpuFrameMs.min().toFixed(2)} / max ${history.cpuFrameMs.max().toFixed(2)}`
+        );
 
         if (snapshot.gpuSupported && snapshot.gpuFrameMs > 0) {
-            this._card('gpu', history.gpuFrameMs.avg().toFixed(2) + ' ms',
-                `min ${history.gpuFrameMs.min().toFixed(2)} / max ${history.gpuFrameMs.max().toFixed(2)}`);
-            const badge = document.getElementById('gpu-badge');
-            if (badge) { badge.textContent = 'supported'; badge.style.background = 'rgba(0,255,136,0.2)'; badge.style.color = '#00ff88'; }
+            this._card(
+                'gpu',
+                `${history.gpuFrameMs.avg().toFixed(2)} ms`,
+                `min ${history.gpuFrameMs.min().toFixed(2)} / max ${history.gpuFrameMs.max().toFixed(2)}`
+            );
+            this._setBadge('gpu-badge', 'supported', '#00ff88', 'rgba(0,255,136,0.2)', 'rgba(0,255,136,0.3)');
         } else {
-            this._card('gpu', snapshot.gpuSupported ? '—' : 'N/A', snapshot.gpuSupported ? 'querying…' : 'not supported');
+            this._card('gpu', snapshot.gpuSupported ? '--' : 'N/A', snapshot.gpuSupported ? 'querying...' : 'not supported');
+            this._setBadge(
+                'gpu-badge',
+                snapshot.gpuSupported ? 'querying...' : 'not supported',
+                snapshot.gpuSupported ? '#00c8ff' : '#ff4455',
+                snapshot.gpuSupported ? 'rgba(0,200,255,0.12)' : 'rgba(255,68,85,0.15)',
+                snapshot.gpuSupported ? 'rgba(0,200,255,0.3)' : 'rgba(255,68,85,0.3)'
+            );
         }
 
         const heapSub = snapshot.heapLimit > 0 ? `limit ${snapshot.heapLimit} MB` : 'unavailable';
-        this._card('mem', snapshot.heapMB > 0 ? snapshot.heapMB.toFixed(1) + ' MB' : 'N/A', heapSub);
-        this._card('dc',  snapshot.drawCalls.toString(), 'per frame');
-        this._card('eff', snapshot.cullEff + '%', `${snapshot.culledTotal.toLocaleString()} culled`);
+        this._card('mem', snapshot.heapMB > 0 ? `${snapshot.heapMB.toFixed(1)} MB` : 'N/A', heapSub);
 
-        // Update method tags
-        this._tag('mtag-frustum',  activeState.useFrustum);
-        this._tag('mtag-octree',   activeState.useOctree);
-        this._tag('mtag-occlusion',activeState.useOcclusion);
-        this._tag('mtag-lod',      activeState.useLOD);
+        const ramSub = snapshot.ramLimitMB > 0
+            ? `${snapshot.ramSource} / limit ${snapshot.ramLimitMB} MB`
+            : snapshot.ramSource;
+        this._card('ram', snapshot.ramMB > 0 ? `${snapshot.ramMB.toFixed(1)} MB` : 'N/A', ramSub);
+        if (snapshot.ramSource === 'Checking') {
+            this._setBadge('ram-badge', 'checking...', '#00c8ff', 'rgba(0,200,255,0.12)', 'rgba(0,200,255,0.3)');
+        } else if (snapshot.ramMB > 0) {
+            this._setBadge('ram-badge', snapshot.ramSource, '#ffb067', 'rgba(255,140,66,0.16)', 'rgba(255,140,66,0.35)');
+        } else {
+            this._setBadge('ram-badge', snapshot.ramSource, '#ff4455', 'rgba(255,68,85,0.15)', 'rgba(255,68,85,0.3)');
+        }
 
-        // Accumulate CSV row
+        this._card('dc', snapshot.drawCalls.toString(), 'per frame');
+        this._card('eff', `${snapshot.cullEff}%`, `${snapshot.culledTotal.toLocaleString()} culled`);
+
+        this._tag('mtag-frustum', activeState.useFrustum);
+        this._tag('mtag-octree', activeState.useOctree);
+        this._tag('mtag-occlusion', activeState.useOcclusion);
+        this._tag('mtag-lod', activeState.useLOD);
+
         this._csvRows.push({
             ts: Date.now(),
             fps: snapshot.fps,
             cpuMs: snapshot.cpuFrameMs,
             gpuMs: snapshot.gpuFrameMs,
             heapMB: snapshot.heapMB,
+            ramMB: snapshot.ramMB,
+            ramSource: snapshot.ramSource,
             drawCalls: snapshot.drawCalls,
             rendered: snapshot.rendered,
             culled: snapshot.culledTotal,
             cullEff: snapshot.cullEff,
             budget: snapshot.frameTimeBudget,
         });
-        if (this._csvRows.length > 5000) this._csvRows.shift(); // limit 5000 rows
+        if (this._csvRows.length > 5000) this._csvRows.shift();
 
-        if (!this.visible) return; // Jangan update chart kalau panel tersembunyi
+        if (!this.visible) return;
 
-        this._pushChart('fps',    history.fps.get());
-        this._pushChart('cpu',    history.cpuFrameMs.get());
-        this._pushChart('gpu',    history.gpuFrameMs.get());
-        this._pushChart('mem',    history.heapMB.get());
-        this._pushChart('eff',    history.cullEff.get());
+        this._pushChart('fps', history.fps.get());
+        this._pushChart('cpu', history.cpuFrameMs.get());
+        this._pushChart('gpu', history.gpuFrameMs.get());
+        this._pushChart('mem', history.heapMB.get());
+        this._pushChart('ram', history.ramMB.get());
+        this._pushChart('eff', history.cullEff.get());
         this._pushChart('budget', history.frameTimeBudget.get());
 
-        // Rendered vs Culled dual chart
-        const r = history.rendered.get();
-        const c = history.culledTotal.get();
-        const labLen = Math.max(r.length, c.length);
-        const labels = Array.from({length: labLen}, (_, i) => `${i}`);
+        const rendered = history.rendered.get();
+        const culled = history.culledTotal.get();
+        const labels = Array.from({ length: Math.max(rendered.length, culled.length) }, (_, index) => `${index}`);
         if (this.charts.objs) {
             this.charts.objs.data.labels = labels;
-            this.charts.objs.data.datasets[0].data = r;
-            this.charts.objs.data.datasets[1].data = c;
+            this.charts.objs.data.datasets[0].data = rendered;
+            this.charts.objs.data.datasets[1].data = culled;
             this.charts.objs.update('none');
         }
     }
 
-    // ──────────────────────────────────────────────────────
-    // Internal helpers
-    // ──────────────────────────────────────────────────────
-
     _card(id, val, sub) {
-        const v = document.getElementById(`cval-${id}`);
-        const s = document.getElementById(`csub-${id}`);
-        if (v) v.textContent = val;
-        if (s) s.textContent = sub;
+        const valueEl = document.getElementById(`cval-${id}`);
+        const subEl = document.getElementById(`csub-${id}`);
+        if (valueEl) valueEl.textContent = val;
+        if (subEl) subEl.textContent = sub;
+    }
+
+    _setBadge(id, text, color, background, borderColor) {
+        const badge = document.getElementById(id);
+        if (!badge) return;
+        badge.textContent = text;
+        badge.style.color = color;
+        badge.style.background = background;
+        badge.style.borderColor = borderColor;
     }
 
     _tag(id, active) {
@@ -322,153 +377,222 @@ export class ChartPanel {
     }
 
     _pushChart(key, data) {
-        const ch = this.charts[key];
-        if (!ch) return;
-        const labels = Array.from({length: data.length}, (_, i) => `${i}`);
-        ch.data.labels = labels;
-        ch.data.datasets[0].data = data;
-        ch.update('none'); // 'none' = no animation (performance!)
+        const chart = this.charts[key];
+        if (!chart) return;
+
+        const labels = Array.from({ length: data.length }, (_, index) => `${index}`);
+        chart.data.labels = labels;
+        if (chart.data.datasets[0]) chart.data.datasets[0].data = data;
+
+        chart.data.datasets.forEach(dataset => {
+            if (dataset.referenceValue == null) return;
+            dataset.data = labels.map(() => dataset.referenceValue);
+        });
+
+        chart.update('none');
     }
 
     _refreshAll() {
-        Object.values(this.charts).forEach(ch => ch.update('none'));
+        Object.values(this.charts)
+            .filter(Boolean)
+            .forEach(chart => chart.update('none'));
+    }
+
+    _resizeCharts() {
+        Object.values(this.charts)
+            .filter(Boolean)
+            .forEach(chart => chart.resize());
     }
 
     _buildCharts() {
-        const makeOpts = (yLabel, min, max, refLine) => {
+        const makeOpts = (yLabel, min, max) => {
             const opts = JSON.parse(JSON.stringify(CHART_DEFAULTS));
             opts.scales.y.title = { display: true, text: yLabel, color: '#5a7080', font: { size: 9 } };
             if (min !== undefined) opts.scales.y.min = min;
             if (max !== undefined) opts.scales.y.suggestedMax = max;
-            if (refLine) {
-                opts.plugins.annotation = {
-                    annotations: {
-                        ref: {
-                            type: 'line', yMin: refLine, yMax: refLine,
-                            borderColor: 'rgba(255,100,100,0.4)',
-                            borderDash: [4,4], borderWidth: 1,
-                        }
-                    }
-                };
-            }
             return opts;
         };
 
-        this.charts.fps    = this._makeChart('ch-fps',    [makeDataset('FPS', CHART_COLOR.fps)],       makeOpts('fps', 0, 120));
-        this.charts.cpu    = this._makeChart('ch-cpu',    [makeDataset('CPU ms', CHART_COLOR.cpu)],     makeOpts('ms',  0, 50, 16.67));
-        this.charts.gpu    = this._makeChart('ch-gpu',    [makeDataset('GPU ms', CHART_COLOR.gpu)],     makeOpts('ms',  0, 50));
-        this.charts.mem    = this._makeChart('ch-mem',    [makeDataset('MB', CHART_COLOR.mem)],         makeOpts('MB',  0));
-        this.charts.eff    = this._makeChart('ch-eff',    [makeDataset('%',  CHART_COLOR.eff)],         makeOpts('%',   0, 100));
-        this.charts.budget = this._makeChart('ch-budget', [makeDataset('%',  CHART_COLOR.budget)],      makeOpts('%',   0, 150, 100));
+        this.charts.fps = this._makeChart('ch-fps', [
+            makeDataset('FPS', CHART_COLOR.fps),
+        ], makeOpts('fps', 0, 120));
 
-        // Dual line chart: rendered + culled
+        this.charts.cpu = this._makeChart('ch-cpu', [
+            makeDataset('CPU ms', CHART_COLOR.cpu),
+            makeRefDataset('60fps target', 16.67),
+        ], makeOpts('ms', 0, 50));
+
+        this.charts.gpu = this._makeChart('ch-gpu', [
+            makeDataset('GPU ms', CHART_COLOR.gpu),
+        ], makeOpts('ms', 0, 50));
+
+        this.charts.mem = this._makeChart('ch-mem', [
+            makeDataset('Heap MB', CHART_COLOR.mem),
+        ], makeOpts('MB', 0));
+
+        this.charts.eff = this._makeChart('ch-eff', [
+            makeDataset('Efficiency %', CHART_COLOR.eff),
+        ], makeOpts('%', 0, 100));
+
+        this.charts.ram = this._makeChart('ch-ram', [
+            makeDataset('RAM MB', CHART_COLOR.ram),
+        ], makeOpts('MB', 0));
+
+        this.charts.budget = this._makeChart('ch-budget', [
+            makeDataset('Budget %', CHART_COLOR.budget),
+            makeRefDataset('100%', 100),
+        ], makeOpts('%', 0, 150));
+
         this.charts.objs = this._makeChart('ch-objs', [
             makeDataset('Rendered', CHART_COLOR.render),
-            makeDataset('Culled',   CHART_COLOR.culled),
+            makeDataset('Culled', CHART_COLOR.culled),
         ], makeOpts('objects', 0));
-        // Enable legend for dual chart
-        this.charts.objs.options.plugins.legend.display = true;
-        this.charts.objs.options.plugins.legend.labels  = {
-            color: '#c8d8e8', font: { family: 'Share Tech Mono', size: 10 },
-            boxWidth: 12, padding: 12,
-        };
-        this.charts.objs.update('none');
+
+        if (this.charts.objs) {
+            this.charts.objs.options.plugins.legend.display = true;
+            this.charts.objs.options.plugins.legend.labels = {
+                color: '#c8d8e8',
+                font: { family: 'Share Tech Mono', size: 10 },
+                boxWidth: 12,
+                padding: 12,
+            };
+            this.charts.objs.update('none');
+        }
     }
 
     _makeChart(canvasId, datasets, options) {
         const canvas = document.getElementById(canvasId);
         if (!canvas) return null;
-        return new Chart(canvas, { type: 'line', data: { labels: [], datasets }, options });
+        return new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { labels: [], datasets },
+            options,
+        });
     }
 
     _bindButtons() {
         document.getElementById('perf-close')?.addEventListener('click', () => this.close());
+
         document.getElementById('perf-clear')?.addEventListener('click', () => {
             this._csvRows = [];
-            Object.values(this.charts).forEach(ch => {
-                ch.data.labels = [];
-                ch.data.datasets.forEach(ds => ds.data = []);
-                ch.update('none');
-            });
+            Object.values(this.charts)
+                .filter(Boolean)
+                .forEach(chart => {
+                    chart.data.labels = [];
+                    chart.data.datasets.forEach(dataset => {
+                        dataset.data = [];
+                    });
+                    chart.update('none');
+                });
         });
+
         document.getElementById('perf-export-csv')?.addEventListener('click', () => this._exportCSV());
-        // Export JSON — reuse same row data but output as JSON
         document.getElementById('perf-export-json')?.addEventListener('click', () => this._exportJSON());
+        document.getElementById('perf-overlay')?.addEventListener('click', event => {
+            if (event.target.id === 'perf-overlay') this.close();
+        });
     }
 
     _exportCSV() {
-        if (!this._csvRows.length) { alert('Belum ada data yang direkam.'); return; }
-        const header = 'timestamp,fps,cpu_ms,gpu_ms,heap_mb,draw_calls,rendered,culled,cull_eff_%,frame_budget_%\n';
-        const rows = this._csvRows.map(r =>
-            `${r.ts},${r.fps},${r.cpuMs},${r.gpuMs},${r.heapMB},${r.drawCalls},${r.rendered},${r.culled},${r.cullEff},${r.budget}`
-        ).join('\n');
+        if (!this._csvRows.length) {
+            alert('Belum ada data yang direkam.');
+            return;
+        }
+
+        const header = 'timestamp,fps,cpu_ms,gpu_ms,heap_mb,ram_mb,ram_source,draw_calls,rendered,culled,cull_eff_pct,frame_budget_pct\n';
+        const rows = this._csvRows.map(row => [
+            row.ts,
+            row.fps,
+            row.cpuMs,
+            row.gpuMs,
+            row.heapMB,
+            row.ramMB,
+            csvEscape(row.ramSource),
+            row.drawCalls,
+            row.rendered,
+            row.culled,
+            row.cullEff,
+            row.budget,
+        ].join(',')).join('\n');
+
         const blob = new Blob([header + rows], { type: 'text/csv' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `perf_data_${Date.now()}.csv`;
-        a.click();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `perf_data_${Date.now()}.csv`;
+        link.click();
     }
 
     _exportJSON() {
-        if (!this._csvRows.length) { alert('Belum ada data yang direkam.'); return; }
-        // Ambil snapshot terbaru (row terakhir)
+        if (!this._csvRows.length) {
+            alert('Belum ada data yang direkam.');
+            return;
+        }
+
         const latest = this._csvRows[this._csvRows.length - 1];
-        const allRows = this._csvRows.map(r => ({
-            timestamp:        r.ts,
-            fps:              r.fps,
-            frameTime:        r.cpuMs,
-            gpuFrameTime:     r.gpuMs,
-            heapMemoryMB:     r.heapMB,
-            drawCalls:        r.drawCalls,
-            renderedObjects:  r.rendered,
-            culledObjects:    r.culled,
-            cullingEfficiency: r.cullEff + '%',
-            frameBudgetPct:   r.budget,
+        const samples = this._csvRows.map(row => ({
+            timestamp: row.ts,
+            fps: row.fps,
+            frameTime: row.cpuMs,
+            gpuFrameTime: row.gpuMs,
+            heapMemoryMB: row.heapMB,
+            ramMemoryMB: row.ramMB,
+            ramSource: row.ramSource,
+            drawCalls: row.drawCalls,
+            renderedObjects: row.rendered,
+            culledObjects: row.culled,
+            cullingEfficiency: `${row.cullEff}%`,
+            frameBudgetPct: row.budget,
         }));
+
         const output = {
-            exportedAt:   new Date().toISOString(),
-            totalSamples: allRows.length,
+            exportedAt: new Date().toISOString(),
+            totalSamples: samples.length,
             summary: {
-                fps:              latest.fps,
-                frameTime:        latest.cpuMs,
-                gpuFrameTime:     latest.gpuMs,
-                heapMemoryMB:     latest.heapMB,
-                drawCalls:        latest.drawCalls,
-                renderedObjects:  latest.rendered,
-                culledObjects:    latest.culled,
-                cullingEfficiency: latest.cullEff + '%',
+                fps: latest.fps,
+                frameTime: latest.cpuMs,
+                gpuFrameTime: latest.gpuMs,
+                heapMemoryMB: latest.heapMB,
+                ramMemoryMB: latest.ramMB,
+                ramSource: latest.ramSource,
+                drawCalls: latest.drawCalls,
+                renderedObjects: latest.rendered,
+                culledObjects: latest.culled,
+                cullingEfficiency: `${latest.cullEff}%`,
             },
-            samples: allRows,
+            samples,
         };
+
         const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `perf_data_${Date.now()}.json`;
-        a.click();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `perf_data_${Date.now()}.json`;
+        link.click();
     }
 
-    // ──────────────────────────────────────────────────────
-    // Styles (injected once)
-    // ──────────────────────────────────────────────────────
     _injectStyles() {
         const css = `
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap');
 
 #perf-overlay {
-    position: fixed; inset: 0;
+    position: fixed;
+    inset: 0;
     z-index: 200;
     background: rgba(2,3,12,0.88);
     backdrop-filter: blur(6px);
     display: none;
-    align-items: center; justify-content: center;
+    align-items: center;
+    justify-content: center;
     padding: 16px;
 }
+
 #perf-overlay.perf-visible {
     display: flex;
 }
 
 #perf-panel {
-    width: 100%; max-width: 1100px; max-height: 90vh;
+    width: 100%;
+    max-width: 1100px;
+    max-height: 90vh;
     background: rgba(6,10,28,0.98);
     border: 1px solid rgba(0,200,255,0.2);
     border-radius: 14px;
@@ -478,57 +602,100 @@ export class ChartPanel {
     color: #c8d8e8;
 }
 
-#perf-panel::-webkit-scrollbar { width: 4px; }
-#perf-panel::-webkit-scrollbar-thumb { background: rgba(0,200,255,0.3); border-radius: 4px; }
+#perf-panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+#perf-panel::-webkit-scrollbar-thumb {
+    background: rgba(0,200,255,0.3);
+    border-radius: 4px;
+}
 
 .perf-header {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     padding: 14px 20px;
     border-bottom: 1px solid rgba(0,200,255,0.12);
     background: linear-gradient(90deg, rgba(0,200,255,0.06), rgba(123,47,255,0.06));
-    position: sticky; top: 0; z-index: 2;
+    position: sticky;
+    top: 0;
+    z-index: 2;
     backdrop-filter: blur(8px);
 }
 
 .perf-title {
-    font-size: 0.8rem; font-weight: 700;
-    letter-spacing: 0.18em; text-transform: uppercase; color: #00c8ff;
-    display: flex; align-items: center; gap: 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #00c8ff;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .perf-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #00ff88; box-shadow: 0 0 8px #00ff88;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 8px #00ff88;
     animation: blink 2s infinite;
 }
 
-.perf-header-right { display: flex; gap: 8px; align-items: center; }
+.perf-header-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
 
 .perf-btn {
     padding: 5px 12px;
-    background: rgba(0,200,255,0.08); border: 1px solid rgba(0,200,255,0.25);
-    border-radius: 5px; color: #00c8ff; font-size: 0.68rem;
-    font-family: 'Share Tech Mono', monospace; letter-spacing: 0.06em;
-    cursor: pointer; transition: 0.15s;
+    background: rgba(0,200,255,0.08);
+    border: 1px solid rgba(0,200,255,0.25);
+    border-radius: 5px;
+    color: #00c8ff;
+    font-size: 0.68rem;
+    font-family: 'Share Tech Mono', monospace;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: 0.15s;
 }
-.perf-btn:hover { background: rgba(0,200,255,0.18); }
+
+.perf-btn:hover {
+    background: rgba(0,200,255,0.18);
+}
 
 .perf-btn-json {
     background: rgba(0,255,136,0.08);
     border-color: rgba(0,255,136,0.3);
     color: #00ff88;
 }
-.perf-btn-json:hover { background: rgba(0,255,136,0.2); }
+
+.perf-btn-json:hover {
+    background: rgba(0,255,136,0.2);
+}
 
 .perf-close {
     padding: 5px 10px;
-    background: rgba(255,68,85,0.1); border: 1px solid rgba(255,68,85,0.3);
-    border-radius: 5px; color: #ff4455; font-size: 0.75rem;
-    cursor: pointer; transition: 0.15s;
+    background: rgba(255,68,85,0.1);
+    border: 1px solid rgba(255,68,85,0.3);
+    border-radius: 5px;
+    color: #ff4455;
+    font-size: 0.68rem;
+    font-family: 'Share Tech Mono', monospace;
+    cursor: pointer;
+    transition: 0.15s;
 }
-.perf-close:hover { background: rgba(255,68,85,0.25); }
 
-/* Summary Cards */
+.perf-close:hover {
+    background: rgba(255,68,85,0.25);
+}
+
 .perf-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -540,91 +707,148 @@ export class ChartPanel {
 .perf-card {
     background: rgba(6,10,28,0.95);
     padding: 14px 16px;
-    display: flex; align-items: center; gap: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     transition: background 0.2s;
 }
-.perf-card:hover { background: rgba(0,200,255,0.04); }
 
-.card-icon { font-size: 1.4rem; opacity: 0.7; }
+.perf-card:hover {
+    background: rgba(0,200,255,0.04);
+}
+
+.card-icon {
+    width: 34px;
+    flex-shrink: 0;
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.86rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #7aa6c2;
+    opacity: 0.95;
+}
+
+#card-ram .card-icon {
+    color: #ffb067;
+}
 
 .card-val {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 1.3rem; color: #00c8ff; line-height: 1;
+    font-size: 1.3rem;
+    color: #00c8ff;
+    line-height: 1;
     margin-bottom: 3px;
 }
 
 .card-lbl {
-    font-size: 0.62rem; text-transform: uppercase;
-    letter-spacing: 0.1em; color: #5a7080;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #5a7080;
 }
 
 .card-sub {
-    font-size: 0.58rem; color: #3a5060;
+    font-size: 0.58rem;
+    color: #3a5060;
     font-family: 'Share Tech Mono', monospace;
     margin-top: 2px;
 }
 
-/* Charts Grid */
 .perf-charts {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1px;
     background: rgba(0,200,255,0.06);
     padding: 1px;
 }
 
-@media (max-width: 900px) {
-    .perf-charts { grid-template-columns: 1fr 1fr; }
+@media (max-width: 980px) {
+    .perf-charts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
-@media (max-width: 600px) {
-    .perf-charts { grid-template-columns: 1fr; }
+
+@media (max-width: 640px) {
+    .perf-charts {
+        grid-template-columns: 1fr;
+    }
 }
 
 .chart-box {
     background: rgba(6,10,28,0.95);
     padding: 14px 16px;
+    min-width: 0;
 }
 
 .chart-wide {
     grid-column: span 2;
 }
 
-.chart-title {
-    font-size: 0.65rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.12em;
-    color: #5a7080; margin-bottom: 10px;
-    display: flex; align-items: center; gap: 8px;
+@media (max-width: 640px) {
+    .chart-wide {
+        grid-column: span 1;
+    }
 }
 
-.chart-unit { color: #3a5060; font-weight: 400; }
-.chart-ref  { color: rgba(255,100,100,0.5); font-size: 0.58rem; }
+.chart-title {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #5a7080;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chart-unit {
+    color: #3a5060;
+    font-weight: 400;
+}
+
+.chart-ref {
+    color: rgba(255,100,100,0.6);
+    font-size: 0.58rem;
+}
 
 .chart-badge {
-    font-size: 0.55rem; padding: 2px 7px;
+    font-size: 0.55rem;
+    padding: 2px 7px;
     background: rgba(255,68,85,0.15);
-    color: #ff4455; border-radius: 3px;
+    color: #ff4455;
+    border-radius: 3px;
     border: 1px solid rgba(255,68,85,0.3);
+    font-family: 'Share Tech Mono', monospace;
 }
 
-.chart-wrap { height: 110px; position: relative; }
+.chart-wrap {
+    height: 110px;
+    position: relative;
+}
 
-/* Footer / method tags */
 .perf-footer {
     padding: 12px 20px;
     border-top: 1px solid rgba(0,200,255,0.1);
-    display: flex; align-items: center; gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     flex-wrap: wrap;
 }
 
 .foot-label {
-    font-size: 0.6rem; text-transform: uppercase;
-    letter-spacing: 0.12em; color: #3a5060;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #3a5060;
     margin-right: 4px;
 }
 
 .method-tag {
-    font-size: 0.62rem; padding: 3px 10px;
+    font-size: 0.62rem;
+    padding: 3px 10px;
     border-radius: 4px;
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.1);
@@ -632,6 +856,7 @@ export class ChartPanel {
     font-family: 'Share Tech Mono', monospace;
     transition: 0.2s;
 }
+
 .method-tag.active {
     background: rgba(0,200,255,0.12);
     border-color: rgba(0,200,255,0.4);
@@ -639,8 +864,28 @@ export class ChartPanel {
     box-shadow: 0 0 8px rgba(0,200,255,0.15);
 }
 
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+@media (max-width: 760px) {
+    .perf-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .perf-header-right {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .perf-card {
+        padding: 12px 14px;
+    }
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
         `;
+
         const style = document.createElement('style');
         style.textContent = css;
         document.head.appendChild(style);
