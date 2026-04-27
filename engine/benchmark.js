@@ -73,13 +73,6 @@ const DEFAULT_TECHNIQUES = [
     },
 ];
 
-function percentile(values, ratio) {
-    if (!Array.isArray(values) || values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(ratio * sorted.length) - 1));
-    return sorted[index];
-}
-
 function toCsvRow(sample) {
     return [
         sample.technique,
@@ -100,7 +93,6 @@ function toCsvRow(sample) {
         sample.stageLodMs,
         sample.reusedVisibility,
         sample.predictedVisible,
-        sample.isWarmup ? 1 : 0,
     ].join(',');
 }
 
@@ -113,12 +105,8 @@ export class BenchmarkRunner {
         this.currentTechnique = null;
         this.results = [];
         this.samples = [];
-        this.allSamples = [];
         this.label = 'benchmark';
         this.sceneLabel = 'scene';
-        this.sceneSeed = null;
-        this.warmupFrames = 30;
-        this.pathMeta = null;
     }
 
     start(path, options = {}) {
@@ -126,18 +114,9 @@ export class BenchmarkRunner {
         this.path = path;
         this.label = options.label || 'benchmark';
         this.sceneLabel = options.sceneLabel || 'scene';
-        this.sceneSeed = Number.isFinite(options.sceneSeed) ? options.sceneSeed : null;
-        this.warmupFrames = Math.max(0, Math.min(300, Number.parseInt(options.warmupFrames, 10) || 30));
-        this.pathMeta = {
-            label: path.label || 'path',
-            sampleCount: path.samples.length,
-            durationMs: path.durationMs || path.samples.at(-1)?.time || 0,
-            options: path.options || null,
-        };
         this.techniques = options.techniques || DEFAULT_TECHNIQUES;
         this.results = [];
         this.samples = [];
-        this.allSamples = [];
         this.currentIndex = -1;
         this.currentTechnique = null;
         this.active = true;
@@ -155,14 +134,8 @@ export class BenchmarkRunner {
             return null;
         }
 
-        const technique = this.techniques[this.currentIndex];
         this.currentTechnique = {
-            ...technique,
-            frameCursor: 0,
-            warmupFrames: Number.isFinite(technique.warmupFrames)
-                ? Math.max(0, Math.floor(technique.warmupFrames))
-                : this.warmupFrames,
-            warmup: [],
+            ...this.techniques[this.currentIndex],
             frames: [],
             startedAt: performance.now(),
         };
@@ -171,55 +144,28 @@ export class BenchmarkRunner {
 
     captureFrame(sample) {
         if (!this.active || !this.currentTechnique) return;
-        const frameIndex = this.currentTechnique.frameCursor++;
-        const warmupLimit = this.currentTechnique.warmupFrames || 0;
         const frameSample = {
             technique: this.currentTechnique.label,
             ...sample,
-            frameIndex,
-            isWarmup: frameIndex < warmupLimit,
         };
-        this.allSamples.push(frameSample);
-
-        if (frameSample.isWarmup) {
-            this.currentTechnique.warmup.push(frameSample);
-            return;
-        }
-
-        const measuredFrame = {
-            ...frameSample,
-            measuredFrameIndex: frameIndex - warmupLimit,
-        };
-        this.currentTechnique.frames.push(measuredFrame);
-        this.samples.push(measuredFrame);
+        this.currentTechnique.frames.push(frameSample);
+        this.samples.push(frameSample);
     }
 
     finalizeCurrentTechnique() {
         if (!this.currentTechnique) return null;
-        const frames = this.currentTechnique.frames.length
-            ? this.currentTechnique.frames
-            : this.currentTechnique.warmup;
+        const frames = this.currentTechnique.frames;
         const avg = key => frames.length
             ? frames.reduce((sum, frame) => sum + (Number(frame[key]) || 0), 0) / frames.length
             : 0;
 
-        const cpuSeries = frames.map(frame => Number(frame.cpuFrameMs) || 0);
-        const gpuSeries = frames.map(frame => Number(frame.gpuFrameMs) || 0);
-        const fpsSeries = frames.map(frame => Number(frame.fps) || 0);
-
         const result = {
             key: this.currentTechnique.key,
             label: this.currentTechnique.label,
-            frameCount: this.currentTechnique.frames.length,
-            warmupFrameCount: this.currentTechnique.warmup.length,
+            frameCount: frames.length,
             avgFps: Number(avg('fps').toFixed(2)),
             avgCpuFrameMs: Number(avg('cpuFrameMs').toFixed(2)),
             avgGpuFrameMs: Number(avg('gpuFrameMs').toFixed(2)),
-            p95CpuFrameMs: Number(percentile(cpuSeries, 0.95).toFixed(2)),
-            p99CpuFrameMs: Number(percentile(cpuSeries, 0.99).toFixed(2)),
-            p95GpuFrameMs: Number(percentile(gpuSeries, 0.95).toFixed(2)),
-            p99GpuFrameMs: Number(percentile(gpuSeries, 0.99).toFixed(2)),
-            p05Fps: Number(percentile(fpsSeries, 0.05).toFixed(2)),
             avgDrawCalls: Number(avg('drawCalls').toFixed(2)),
             avgRendered: Number(avg('rendered').toFixed(2)),
             avgCulled: Number(avg('culled').toFixed(2)),
@@ -241,13 +187,9 @@ export class BenchmarkRunner {
         return JSON.stringify({
             label: this.label,
             sceneLabel: this.sceneLabel,
-            sceneSeed: this.sceneSeed,
-            warmupFrames: this.warmupFrames,
             generatedAt: new Date().toISOString(),
-            path: this.pathMeta,
             techniques: this.results,
             frames: this.samples,
-            allFrames: this.allSamples,
         }, null, 2);
     }
 
@@ -271,9 +213,8 @@ export class BenchmarkRunner {
             'stage_lod_ms',
             'reused_visibility',
             'predicted_visible',
-            'is_warmup',
         ].join(',');
-        return [header, ...this.allSamples.map(toCsvRow)].join('\n');
+        return [header, ...this.samples.map(toCsvRow)].join('\n');
     }
 
     getStatus() {
@@ -288,8 +229,6 @@ export class BenchmarkRunner {
                 : 0,
             techniqueCount: this.techniques.length,
             completedCount: this.results.length,
-            warmupFrames: this.warmupFrames,
-            sceneSeed: this.sceneSeed,
         };
     }
 }

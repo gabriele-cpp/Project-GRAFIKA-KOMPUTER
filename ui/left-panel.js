@@ -59,8 +59,6 @@ const PANEL_HTML = `
         <select id="lp-sel-mode">
           <option value="random">Random</option>
           <option value="clustered">Clustered</option>
-          <option value="minecraft">Voxel (Minecraft-like)</option>
-          <option value="dungeon">Dungeon (Indoor)</option>
         </select>
       </div>
 
@@ -693,14 +691,6 @@ export class LeftPanel {
         const numIn  = document.getElementById('lp-obj-num');
         if (slider) slider.value = count;
         if (numIn)  numIn.value  = count;
-    }
-
-    syncSceneControls({ count, mode, paletteIdx } = {}) {
-        if (count != null) this.syncObjCount(count);
-        const modeSelect = document.getElementById('lp-sel-mode');
-        const paletteSelect = document.getElementById('lp-sel-palette');
-        if (modeSelect && mode != null) modeSelect.value = mode;
-        if (paletteSelect && paletteIdx != null) paletteSelect.value = String(paletteIdx);
     }
 
     updateSceneSummary(label = 'Random', groups = {}, total = 0) {
