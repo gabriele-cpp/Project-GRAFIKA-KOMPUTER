@@ -1,0 +1,9 @@
+# Folder IDE (biar error tadi ilang)
+.idea/
+.vscode/
+
+# File sistem & log
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
