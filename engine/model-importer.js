@@ -25,6 +25,10 @@ export class ModelImporter {
         this._lastMX = 0;
         this._lastMY = 0;
         this._dragDirty = false;
+        this._transformMode = 'translate';
+        this._snapEnabled = false;
+        this._snapStep = 1;
+        this._axisLock = 'none';
 
         this.onLoad = null;
         this.onError = null;
@@ -81,6 +85,25 @@ export class ModelImporter {
 
     async loadFile(file) {
         await this.loadFiles([file]);
+    }
+
+    setTransformOptions(options = {}) {
+        const modes = new Set(['translate', 'rotate']);
+        const axisModes = new Set(['none', 'x', 'y', 'z']);
+
+        if (typeof options.transformMode === 'string' && modes.has(options.transformMode)) {
+            this._transformMode = options.transformMode;
+        }
+        if (typeof options.axisLock === 'string' && axisModes.has(options.axisLock)) {
+            this._axisLock = options.axisLock;
+        }
+        if (typeof options.snapEnabled === 'boolean') {
+            this._snapEnabled = options.snapEnabled;
+        }
+        if (options.snapStep != null) {
+            const parsed = Number.parseFloat(options.snapStep);
+            if (Number.isFinite(parsed)) this._snapStep = Math.max(0.05, Math.min(100, parsed));
+        }
     }
 
     async loadFiles(files) {
@@ -296,7 +319,7 @@ export class ModelImporter {
 
             this.select(picked.id);
             this._dragging = true;
-            this._dragMode = event.shiftKey ? 'rotate' : 'translate';
+            this._dragMode = event.shiftKey ? 'rotate' : this._transformMode;
             this._lastMX = event.clientX;
             this._lastMY = event.clientY;
             this._dragPlane = this._makeDragPlane(picked.root.position);
@@ -332,12 +355,38 @@ export class ModelImporter {
             this._lastMY = event.clientY;
 
             if (this._dragMode === 'rotate' || event.shiftKey) {
-                entry.root.rotation.y += dx * 0.01;
-                entry.root.rotation.x += dy * 0.01;
+                if (this._axisLock === 'x') {
+                    entry.root.rotation.x += dy * 0.01;
+                } else if (this._axisLock === 'y') {
+                    entry.root.rotation.y += dx * 0.01;
+                } else if (this._axisLock === 'z') {
+                    entry.root.rotation.z += dx * 0.01;
+                } else {
+                    entry.root.rotation.y += dx * 0.01;
+                    entry.root.rotation.x += dy * 0.01;
+                }
             } else {
                 const point = this._intersectPointerPlane(event, this._dragPlane);
                 if (point && this._dragStartPoint && this._dragStartPosition) {
-                    entry.root.position.copy(this._dragStartPosition.clone().add(point.sub(this._dragStartPoint)));
+                    const nextPosition = this._dragStartPosition.clone().add(point.sub(this._dragStartPoint));
+                    if (this._axisLock === 'x') {
+                        nextPosition.y = this._dragStartPosition.y;
+                        nextPosition.z = this._dragStartPosition.z;
+                    } else if (this._axisLock === 'y') {
+                        nextPosition.x = this._dragStartPosition.x;
+                        nextPosition.z = this._dragStartPosition.z;
+                    } else if (this._axisLock === 'z') {
+                        nextPosition.x = this._dragStartPosition.x;
+                        nextPosition.y = this._dragStartPosition.y;
+                    }
+                    if (this._snapEnabled) {
+                        const snap = Math.max(0.05, this._snapStep || 1);
+                        const shouldSnapAxis = axis => this._axisLock === 'none' || this._axisLock === axis;
+                        if (shouldSnapAxis('x')) nextPosition.x = Math.round(nextPosition.x / snap) * snap;
+                        if (shouldSnapAxis('y')) nextPosition.y = Math.round(nextPosition.y / snap) * snap;
+                        if (shouldSnapAxis('z')) nextPosition.z = Math.round(nextPosition.z / snap) * snap;
+                    }
+                    entry.root.position.copy(nextPosition);
                 }
             }
 

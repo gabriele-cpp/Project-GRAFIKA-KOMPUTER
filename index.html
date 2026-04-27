@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Simulator — Hybrid Spatial-Occlusion Culling</title>
+    <title>3D Simulator - Hybrid Spatial-Occlusion Culling</title>
     <link rel="stylesheet" href="style.css">
     <!-- Import map: resolve bare 'three' specifier untuk GLTFLoader/OBJLoader internal imports -->
     <script type="importmap">
@@ -48,28 +48,7 @@
     </div>
 </div>
 
-<!-- Right control panel dihapus — semua kontrol dipindah ke Left Panel -->
-<!-- Hidden fallback elements agar referensi ID di main.js tidak error -->
-<div style="display:none">
-  <input type="checkbox" id="toggleFrustum" checked>
-  <input type="checkbox" id="toggleOctree" checked>
-  <input type="checkbox" id="toggleOcclusion">
-  <input type="checkbox" id="toggleLOD">
-  <input type="checkbox" id="toggleBBox">
-  <input type="checkbox" id="toggleLODColor">
-  <input type="range"    id="obj-slider" min="1" max="50000" step="1" value="500">
-  <span id="obj-count-display"></span>
-  <select id="sel-mode"><option value="random">Random</option><option value="clustered">Clustered</option></select>
-  <select id="sel-palette"><option value="0">0</option><option value="1">1</option><option value="2">2</option></select>
-  <button id="btn-generate"></button>
-  <button id="btn-upload"></button>
-  <input type="file" id="file-input" accept=".gltf,.glb,.obj">
-  <button id="btn-perf"></button>
-</div>
-
-
-
-<!-- CULLING BREAKDOWN (bottom-left — offset for left panel toggle) -->
+<!-- CULLING BREAKDOWN (bottom-left - offset for left panel toggle) -->
 <div id="cull-breakdown">
     <div class="cull-title">Culling Breakdown</div>
 
@@ -91,7 +70,7 @@
 <div id="controls-hint">
     <span class="hint-key">W A S D</span> Move &nbsp;
     <span class="hint-key">Q / E</span> Up/Down<br>
-    <span class="hint-key">←→↑↓</span> Look &nbsp;
+    <span class="hint-key">Arrow Keys</span> Look &nbsp;
     <span class="hint-key">Mouse</span> Click+Drag to look
 </div>
 
