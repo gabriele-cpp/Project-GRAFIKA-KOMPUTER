@@ -287,27 +287,6 @@ const CSS = `
   flex-shrink: 0;
 }
 
-.ip-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 0.62rem;
-  color: var(--ip-dim);
-  margin-bottom: 7px;
-}
-
-.ip-select {
-  width: 100%;
-  background: rgba(0,200,255,0.06);
-  border: 1px solid var(--ip-border);
-  border-radius: 6px;
-  color: var(--ip-text);
-  font-size: 0.68rem;
-  padding: 7px 8px;
-  outline: none;
-}
-
 /* ── Buttons ── */
 .ip-btn {
   display: block; width: 100%;
@@ -526,41 +505,6 @@ const HTML = `
       </div>
     </div>
 
-    <div class="ip-section">
-      <div class="ip-sec-title">Transform Workflow</div>
-
-      <div class="ip-field">
-        <label class="ip-label">Mode</label>
-        <select id="ip-transform-mode" class="ip-select">
-          <option value="translate">Translate</option>
-          <option value="rotate">Rotate</option>
-        </select>
-      </div>
-
-      <div class="ip-field">
-        <label class="ip-label">Axis Lock</label>
-        <select id="ip-axis-lock" class="ip-select">
-          <option value="none">None</option>
-          <option value="x">X</option>
-          <option value="y">Y</option>
-          <option value="z">Z</option>
-        </select>
-      </div>
-
-      <label class="ip-toggle-row">
-        <span>Snap to Grid</span>
-        <input type="checkbox" id="ip-snap-enabled">
-      </label>
-
-      <div class="ip-field">
-        <label class="ip-label">Snap Step <span id="ip-val-snap-step">1.00</span></label>
-        <div class="ip-slider-row">
-          <input type="range" id="ip-slider-snap-step" min="0.05" max="8" step="0.05" value="1">
-          <input type="number" class="ip-num" id="ip-num-snap-step" min="0.05" max="8" step="0.05" value="1">
-        </div>
-      </div>
-    </div>
-
     <!-- Actions -->
     <div class="ip-section">
       <div class="ip-sec-title">Actions</div>
@@ -593,10 +537,6 @@ export class ImportPanel {
         this._scaleX = 1.0;
         this._scaleY = 1.0;
         this._scaleZ = 1.0;
-        this._transformMode = 'translate';
-        this._axisLock = 'none';
-        this._snapEnabled = false;
-        this._snapStep = 1;
     }
 
     mount(callbacks = {}) {
@@ -824,29 +764,6 @@ export class ImportPanel {
             v => { this._scaleY = v; onAxisChange(); }, 0.01, 10, 0.01, v => v.toFixed(2));
         this._syncPair('ip-slider-scale-z', 'ip-num-scale-z', null,
             v => { this._scaleZ = v; onAxisChange(); }, 0.01, 10, 0.01, v => v.toFixed(2));
-
-        this._syncPair('ip-slider-snap-step', 'ip-num-snap-step', 'ip-val-snap-step',
-            v => {
-                this._snapStep = v;
-                this._emitTransformOptions();
-            },
-            0.05, 8, 0.05, v => v.toFixed(2)
-        );
-
-        document.getElementById('ip-transform-mode')?.addEventListener('change', event => {
-            this._transformMode = event.target.value || 'translate';
-            this._emitTransformOptions();
-        });
-        document.getElementById('ip-axis-lock')?.addEventListener('change', event => {
-            this._axisLock = event.target.value || 'none';
-            this._emitTransformOptions();
-        });
-        document.getElementById('ip-snap-enabled')?.addEventListener('change', event => {
-            this._snapEnabled = !!event.target.checked;
-            this._emitTransformOptions();
-        });
-
-        this._emitTransformOptions();
     }
 
     // Helper: bi-directional sync slider ↔ number input
@@ -898,15 +815,6 @@ export class ImportPanel {
         if (num)    num.value    = v.toFixed(2);
     }
 
-    _emitTransformOptions() {
-        this.callbacks.onTransformOptions?.({
-            transformMode: this._transformMode,
-            axisLock: this._axisLock,
-            snapEnabled: this._snapEnabled,
-            snapStep: this._snapStep,
-        });
-    }
-
     _resetSliders() {
         ['u','x','y','z'].forEach(a => this._setAxisValue(a, 1.0));
         this._scaleU = this._scaleX = this._scaleY = this._scaleZ = 1.0;
@@ -917,23 +825,5 @@ export class ImportPanel {
         if (countNum)    { countNum.max = 1000;    countNum.value    = 1; }
         if (countLabel)  countLabel.textContent = '1';
         this._instanceCount = 1;
-
-        this._transformMode = 'translate';
-        this._axisLock = 'none';
-        this._snapEnabled = false;
-        this._snapStep = 1;
-        const modeSelect = document.getElementById('ip-transform-mode');
-        const axisSelect = document.getElementById('ip-axis-lock');
-        const snapEnabled = document.getElementById('ip-snap-enabled');
-        const snapSlider = document.getElementById('ip-slider-snap-step');
-        const snapNum = document.getElementById('ip-num-snap-step');
-        const snapLabel = document.getElementById('ip-val-snap-step');
-        if (modeSelect) modeSelect.value = 'translate';
-        if (axisSelect) axisSelect.value = 'none';
-        if (snapEnabled) snapEnabled.checked = false;
-        if (snapSlider) snapSlider.value = '1';
-        if (snapNum) snapNum.value = '1.00';
-        if (snapLabel) snapLabel.textContent = '1.00';
-        this._emitTransformOptions();
     }
 }

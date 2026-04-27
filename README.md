@@ -140,16 +140,9 @@ main.js
 engine/
   adaptive-quality.js
   benchmark.js
-  camera.js
   camera-path.js
-  geometry.js
-  math.js
-  mesh.js
-  model-importer.js
-  model-loader.js
   performance.js
   renderer.js
-  shader.js
 culling/
   frustum.js
   hybrid-pipeline.js
@@ -159,10 +152,7 @@ culling/
 objects/
   scene-generator.js
 ui/
-  bootstrap.js
   chart-panel.js
-  hud.js
-  import-panel.js
   left-panel.js
   research-panel.js
 ```
@@ -182,7 +172,7 @@ ui/
 
 ## Run / Research Workflow
 
-1. Generate a low, medium, high, or Voxel (Minecraft-like) scene from the panel.
+1. Generate a low, medium, or high complexity scene from the Research Lab panel.
 2. Record a camera path.
 3. Replay it once to validate the route.
 4. Run the 6-technique benchmark.

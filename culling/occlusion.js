@@ -23,18 +23,11 @@ export class OcclusionCuller {
     }
 
     setResolution(resolution) {
-        const next = Math.max(8, Math.min(64, Number(resolution) || this.gridResolution));
+        const next = Math.max(8, Math.min(48, Number(resolution) || this.gridResolution));
         if (next === this.gridResolution) return;
         this.gridResolution = next;
         this.depthGrid = new Float32Array(this.gridResolution * this.gridResolution);
         this.resetGrid();
-    }
-
-    getDepthGridSnapshot() {
-        return {
-            resolution: this.gridResolution,
-            values: Array.from(this.depthGrid),
-        };
     }
 
     beginFrame(camera, viewProjectionMatrix) {
