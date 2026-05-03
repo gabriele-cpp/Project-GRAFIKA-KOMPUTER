@@ -211,7 +211,9 @@ window.addEventListener('resize', () => {
 const frustum = new Frustum();
 const octree = new Octree(650, 5, 24);
 const lod = new LOD();
+lod.enabled = true;
 const occlusion = new OcclusionCuller();
+occlusion.enabled = true;
 const hybridPipeline = new HybridCullingPipeline({ frustum, octree, occlusion, lod });
 const perfMonitor = new PerformanceMonitor(gl);
 const adaptiveQuality = new AdaptiveQualityManager(60);
@@ -272,8 +274,8 @@ const meshCache = new Map([['cube', activeMesh]]);
 const state = {
     useFrustum: true,
     useOctree: true,
-    useOcclusion: false,
-    useLOD: false,
+    useOcclusion: true,
+    useLOD: true,
     useTemporalCoherence: true,
     usePredictiveCulling: true,
     useInstancing: true,
@@ -289,7 +291,7 @@ const state = {
     sceneSeed: randomSeed(),
     environmentLabel: 'Random',
     environmentGroups: {},
-    occlusionResolution: 24,
+    occlusionResolution: 32,
     lodNear: lod.nearThreshold,
     lodMid: lod.midThreshold,
     lodFar: lod.farThreshold,
@@ -1050,6 +1052,7 @@ mountUI({
 regenerateObjects();
 syncSceneUI();
 hud.updateStats({ fps: 0, drawn: 0, total: 0, stageStats: null });
+chartPanel.init(); // Tampilkan dashboard langsung saat load
 
 function gameLoop() {
     perfMonitor.beginFrame();

@@ -50,19 +50,31 @@
 
 <!-- CULLING BREAKDOWN (bottom-left - offset for left panel toggle) -->
 <div id="cull-breakdown">
-    <div class="cull-title">Culling Breakdown</div>
+    <div class="cull-title">CULLING BREAKDOWN</div>
 
     <div class="cull-row">
         <span><span class="cull-dot" style="background:#00c8ff"></span>Distance + Frustum</span>
         <span class="cull-val" id="stat-cF">0</span>
     </div>
+    <div class="cull-row cull-perf-row">
+        <span class="cull-perf-label">Spatial stage</span>
+        <span class="cull-perf-val" id="stat-perf-spatial">0.00ms</span>
+    </div>
     <div class="cull-row">
         <span><span class="cull-dot" style="background:#7b2fff"></span>Occlusion</span>
         <span class="cull-val" id="stat-cO">0</span>
     </div>
+    <div class="cull-row cull-perf-row">
+        <span class="cull-perf-label">Occlusion stage</span>
+        <span class="cull-perf-val" id="stat-perf-occlusion">0.00ms</span>
+    </div>
     <div class="cull-row">
         <span><span class="cull-dot" style="background:#ffe033"></span>LOD (distance)</span>
         <span class="cull-val" id="stat-cL">0</span>
+    </div>
+    <div class="cull-row cull-perf-row">
+        <span class="cull-perf-label">LOD stage</span>
+        <span class="cull-perf-val" id="stat-perf-lod">0.00ms</span>
     </div>
 </div>
 

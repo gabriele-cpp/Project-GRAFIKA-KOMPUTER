@@ -18,6 +18,9 @@ export class HudOverlay {
     this.cullingBreakdownF = document.getElementById('stat-cF');
     this.cullingBreakdownO = document.getElementById('stat-cO');
     this.cullingBreakdownL = document.getElementById('stat-cL');
+    this.perfSpatialEl   = document.getElementById('stat-perf-spatial');
+    this.perfOcclusionEl = document.getElementById('stat-perf-occlusion');
+    this.perfLodEl       = document.getElementById('stat-perf-lod');
 
     this.toastTimeout = null;
     this.setupStyles();
@@ -96,15 +99,12 @@ export class HudOverlay {
     // Update culling breakdown if stageStats available
     if (stats.stageStats) {
       const ss = stats.stageStats;
-      if (this.cullingBreakdownF) {
-        this.cullingBreakdownF.textContent = ss.culledFrustum || 0;
-      }
-      if (this.cullingBreakdownO) {
-        this.cullingBreakdownO.textContent = ss.culledOcclusion || 0;
-      }
-      if (this.cullingBreakdownL) {
-        this.cullingBreakdownL.textContent = ss.culledLOD || 0;
-      }
+      if (this.cullingBreakdownF) this.cullingBreakdownF.textContent = ss.frustumCulled || 0;
+      if (this.cullingBreakdownO) this.cullingBreakdownO.textContent = ss.occlusionCulled || 0;
+      if (this.cullingBreakdownL) this.cullingBreakdownL.textContent = ss.lodCulled || 0;
+      if (this.perfSpatialEl)   this.perfSpatialEl.textContent   = (ss.spatialMs   || 0).toFixed(2) + 'ms';
+      if (this.perfOcclusionEl) this.perfOcclusionEl.textContent = (ss.occlusionMs || 0).toFixed(2) + 'ms';
+      if (this.perfLodEl)       this.perfLodEl.textContent       = (ss.lodMs       || 0).toFixed(2) + 'ms';
     }
   }
 }

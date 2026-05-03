@@ -69,6 +69,11 @@ export function mountUI(options) {
       onCameraSpeed: (value) => setCameraSpeed?.(value),
       onCameraTurnSpeed: (value) => setCameraTurnSpeed?.(value),
     });
+
+    // Tombol DASH di top stats bar
+    document.getElementById('dash-toggle-btn')?.addEventListener('click', () => {
+      chartPanel.toggle?.();
+    });
     leftPanel.syncState(state);
     leftPanel.syncSceneControls({
       count: state.objectCount,

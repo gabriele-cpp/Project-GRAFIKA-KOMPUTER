@@ -14,7 +14,7 @@ function clamp(value, min, max) {
 export class OcclusionCuller {
     constructor() {
         this.enabled = false;
-        this.gridResolution = 24;
+        this.gridResolution = 32;
         this.depthGrid = new Float32Array(this.gridResolution * this.gridResolution);
         this.viewProjectionMatrix = null;
         this.cameraPosition = [0, 0, 0];
@@ -58,68 +58,96 @@ export class OcclusionCuller {
         return dot > 0;
     }
 
+    // Project 8 sudut AABB ke screen-space NDC.
+    // Lebih akurat dari sphere-radius approximation — penting untuk objek lebar/tinggi.
     projectBounds(bounds) {
         if (!this.viewProjectionMatrix || !bounds) return null;
-        const clip = multiplyVec4(
-            this.viewProjectionMatrix,
-            bounds.center[0],
-            bounds.center[1],
-            bounds.center[2],
-            1
-        );
-        if (clip[3] <= 0.0001) return null;
+        const c  = bounds.center;
+        const h  = bounds.halfSize || [bounds.radius, bounds.radius, bounds.radius];
+        const R  = this.gridResolution;
 
-        const invW = 1 / clip[3];
-        const ndcX = clip[0] * invW;
-        const ndcY = clip[1] * invW;
-        const ndcZ = clip[2] * invW;
+        let sMinX = Infinity, sMaxX = -Infinity;
+        let sMinY = Infinity, sMaxY = -Infinity;
+        let depthMin = Infinity;   // NDC Z terdekat (terkecil = lebih dekat ke kamera)
+        let depthCenter = 1;
 
-        const projectedRadius = clamp((bounds.radius / Math.max(clip[3], 0.1)) * 2.2, 0.01, 0.7);
-        const minX = clamp(Math.floor(((ndcX - projectedRadius) * 0.5 + 0.5) * this.gridResolution), 0, this.gridResolution - 1);
-        const maxX = clamp(Math.ceil(((ndcX + projectedRadius) * 0.5 + 0.5) * this.gridResolution), 0, this.gridResolution - 1);
-        const minY = clamp(Math.floor(((-ndcY - projectedRadius) * 0.5 + 0.5) * this.gridResolution), 0, this.gridResolution - 1);
-        const maxY = clamp(Math.ceil(((-ndcY + projectedRadius) * 0.5 + 0.5) * this.gridResolution), 0, this.gridResolution - 1);
+        // Project center untuk depth reference
+        const cc = multiplyVec4(this.viewProjectionMatrix, c[0], c[1], c[2], 1);
+        if (cc[3] > 0.001) depthCenter = cc[2] / cc[3];
 
-        return {
-            minX,
-            maxX,
-            minY,
-            maxY,
-            depth: ndcZ,
-        };
+        // Project 8 sudut AABB
+        for (let xi = -1; xi <= 1; xi += 2) {
+            for (let yi = -1; yi <= 1; yi += 2) {
+                for (let zi = -1; zi <= 1; zi += 2) {
+                    const clip = multiplyVec4(
+                        this.viewProjectionMatrix,
+                        c[0] + xi * h[0],
+                        c[1] + yi * h[1],
+                        c[2] + zi * h[2],
+                        1
+                    );
+                    if (clip[3] <= 0.001) continue;
+                    const iw = 1 / clip[3];
+                    const nx = clip[0] * iw;
+                    const ny = clip[1] * iw;
+                    const nz = clip[2] * iw;
+                    if (nx < sMinX) sMinX = nx;
+                    if (nx > sMaxX) sMaxX = nx;
+                    if (ny < sMinY) sMinY = ny;
+                    if (ny > sMaxY) sMaxY = ny;
+                    if (nz < depthMin) depthMin = nz;
+                }
+            }
+        }
+
+        if (sMinX === Infinity) return null;
+
+        // NDC [-1,1] → grid [0, R-1]; NDC Y is flipped (top = +1)
+        const minX = clamp(Math.floor(( sMinX * 0.5 + 0.5) * R), 0, R - 1);
+        const maxX = clamp(Math.ceil (( sMaxX * 0.5 + 0.5) * R), 0, R - 1);
+        const minY = clamp(Math.floor((-sMaxY * 0.5 + 0.5) * R), 0, R - 1);
+        const maxY = clamp(Math.ceil ((-sMinY * 0.5 + 0.5) * R), 0, R - 1);
+
+        if (minX > maxX || minY > maxY) return null;
+        return { minX, maxX, minY, maxY, depthFront: depthMin, depthCenter };
     }
 
     isOccluded(bounds) {
-        const projection = this.projectBounds(bounds);
-        if (!projection) return false;
+        const proj = this.projectBounds(bounds);
+        if (!proj) return false;
 
         let covered = 0;
-        let occluded = 0;
-        for (let y = projection.minY; y <= projection.maxY; y++) {
-            for (let x = projection.minX; x <= projection.maxX; x++) {
+        let blocked = 0;
+        for (let y = proj.minY; y <= proj.maxY; y++) {
+            for (let x = proj.minX; x <= proj.maxX; x++) {
                 const cellDepth = this.depthGrid[y * this.gridResolution + x];
                 covered++;
-                if (cellDepth < projection.depth - 0.03) occluded++;
+                // Pakai depthFront (sisi paling dekat kamera), bukan depthCenter.
+                // Bias 0.02 untuk toleransi floating-point.
+                if (cellDepth < proj.depthFront - 0.02) blocked++;
             }
         }
-        return covered > 0 && occluded === covered;
+        // Turunkan threshold 85% → 70% agar lebih sensitif
+        return covered > 0 && (blocked / covered) >= 0.70;
     }
 
     registerVisibleObject(bounds, weight = 1) {
-        const projection = this.projectBounds(bounds);
-        if (!projection) return;
-        const depth = projection.depth - Math.min(0.02, Math.max(0.002, bounds.radius * 0.001 * weight));
-        for (let y = projection.minY; y <= projection.maxY; y++) {
-            for (let x = projection.minX; x <= projection.maxX; x++) {
-                const index = y * this.gridResolution + x;
-                if (depth < this.depthGrid[index]) this.depthGrid[index] = depth;
+        const proj = this.projectBounds(bounds);
+        if (!proj) return;
+        // Tulis depthFront (sisi terdekat occluder) ke depth grid
+        const writeDepth = proj.depthFront - 0.004 * weight;
+        for (let y = proj.minY; y <= proj.maxY; y++) {
+            for (let x = proj.minX; x <= proj.maxX; x++) {
+                const idx = y * this.gridResolution + x;
+                if (writeDepth < this.depthGrid[idx]) this.depthGrid[idx] = writeDepth;
             }
         }
     }
 
     shouldRender(object, objDist, camPos, camFwd) {
         if (!this.enabled) return true;
-        if (!this.isFacingCamera(object.pos, camPos, camFwd)) return false;
+        // Tidak filter dengan isFacingCamera — dari view samping semua objek
+        // akan di-skip karena dot product mendekati 0. Cukup cek depth grid.
         return !this.isOccluded(object.bounds);
     }
 }

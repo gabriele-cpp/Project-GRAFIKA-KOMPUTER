@@ -137,7 +137,10 @@ function layeredNoise(x, z, seed = 0) {
 function sampleVoxelHeight(x, z, seed = 0) {
     const terrain = layeredNoise(x, z, seed);
     const ridge = Math.abs(layeredNoise(x + 100, z - 100, seed + 211) - 0.5) * 2;
-    return Math.round(terrain * 9 - ridge * 2.2) - 2;
+    // Diperbesar: range ketinggian dari ~9 jadi ~22 unit
+    // Ini penting agar dari sudut samping ada banyak objek yang ter-occlude
+    // oleh terrain/pohon yang lebih tinggi di depannya
+    return Math.round(terrain * 22 - ridge * 4) - 3;
 }
 
 function buildVoxelPalette(paletteIdx = 0) {
@@ -266,7 +269,9 @@ export function generateVoxelWorld(options = {}) {
     const seed = Number.isFinite(options.seed) ? options.seed : Math.random() * 10000;
 
     const terrainBudget = Math.max(2000, Math.floor(targetCount * 0.76));
-    const blockHalf = 1.8;
+    // blockHalf diperbesar 1.8 → 2.4 agar world lebih luas → LOD bisa aktif
+    // pada threshold default (nearThreshold=150, farThreshold=600)
+    const blockHalf = 2.4;
     const cellSize = blockHalf * 2;
     const roughSideLength = Math.floor(Math.sqrt(terrainBudget));
     const sideLength = Math.max(80, Math.min(320, roughSideLength | 1));

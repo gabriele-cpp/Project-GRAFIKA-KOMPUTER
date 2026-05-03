@@ -88,7 +88,8 @@ function buildPanelHTML() {
         <button class="perf-btn" id="perf-export-csv">Export CSV</button>
         <button class="perf-btn perf-btn-json" id="perf-export-json">Export JSON</button>
         <button class="perf-btn" id="perf-clear">Clear</button>
-        <button class="perf-close" id="perf-close">Close</button>
+        <button class="perf-btn perf-btn-minimize" id="perf-minimize">▼ Min</button>
+        <button class="perf-close" id="perf-close">✕</button>
       </div>
     </div>
 
@@ -234,6 +235,12 @@ export class ChartPanel {
         this._injectStyles();
         this._buildCharts();
         this._bindButtons();
+
+        // Tampil langsung saat init — permanen di layar
+        this.visible = true;
+        const overlay = document.getElementById('perf-overlay');
+        if (overlay) overlay.classList.add('perf-visible');
+        requestAnimationFrame(() => this._resizeCharts());
     }
 
     toggle() {
@@ -241,19 +248,26 @@ export class ChartPanel {
         const overlay = document.getElementById('perf-overlay');
         if (!overlay) return;
 
-        this.visible = !this.visible;
-        overlay.classList.toggle('perf-visible', this.visible);
-
-        if (this.visible) {
+        // Jika belum tampil, tampilkan
+        if (!this.visible) {
+            this.visible = true;
+            overlay.classList.add('perf-visible');
+            overlay.classList.remove('perf-minimized');
+            const btn = document.getElementById('perf-minimize');
+            if (btn) btn.textContent = '▼ Min';
             requestAnimationFrame(() => {
                 this._resizeCharts();
                 if (this._lastPerfMonitor && this._lastActiveState) {
                     this.update(this._lastPerfMonitor, this._lastActiveState);
-                } else {
-                    this._refreshAll();
                 }
             });
+            return;
         }
+
+        // Jika sudah tampil, toggle minimize
+        const isMin = overlay.classList.toggle('perf-minimized');
+        const btn = document.getElementById('perf-minimize');
+        if (btn) btn.textContent = isMin ? '▲ Max' : '▼ Min';
     }
 
     close() {
@@ -335,22 +349,26 @@ export class ChartPanel {
 
         if (!this.visible) return;
 
-        this._pushChart('fps', history.fps.get());
-        this._pushChart('cpu', history.cpuFrameMs.get());
-        this._pushChart('gpu', history.gpuFrameMs.get());
-        this._pushChart('mem', history.heapMB.get());
-        this._pushChart('ram', history.ramMB.get());
-        this._pushChart('eff', history.cullEff.get());
-        this._pushChart('budget', history.frameTimeBudget.get());
+        // Hanya update chart DOM saat panel tidak di-minimize (hemat CPU)
+        const isMinimized = document.getElementById('perf-overlay')?.classList.contains('perf-minimized');
+        if (!isMinimized) {
+            this._pushChart('fps', history.fps.get());
+            this._pushChart('cpu', history.cpuFrameMs.get());
+            this._pushChart('gpu', history.gpuFrameMs.get());
+            this._pushChart('mem', history.heapMB.get());
+            this._pushChart('ram', history.ramMB.get());
+            this._pushChart('eff', history.cullEff.get());
+            this._pushChart('budget', history.frameTimeBudget.get());
 
-        const rendered = history.rendered.get();
-        const culled = history.culledTotal.get();
-        const labels = Array.from({ length: Math.max(rendered.length, culled.length) }, (_, index) => `${index}`);
-        if (this.charts.objs) {
-            this.charts.objs.data.labels = labels;
-            this.charts.objs.data.datasets[0].data = rendered;
-            this.charts.objs.data.datasets[1].data = culled;
-            this.charts.objs.update('none');
+            const rendered = history.rendered.get();
+            const culled = history.culledTotal.get();
+            const labels = Array.from({ length: Math.max(rendered.length, culled.length) }, (_, index) => `${index}`);
+            if (this.charts.objs) {
+                this.charts.objs.data.labels = labels;
+                this.charts.objs.data.datasets[0].data = rendered;
+                this.charts.objs.data.datasets[1].data = culled;
+                this.charts.objs.update('none');
+            }
         }
     }
 
@@ -473,6 +491,16 @@ export class ChartPanel {
     _bindButtons() {
         document.getElementById('perf-close')?.addEventListener('click', () => this.close());
 
+        document.getElementById('perf-minimize')?.addEventListener('click', () => {
+            const overlay = document.getElementById('perf-overlay');
+            if (!overlay) return;
+            const isMin = overlay.classList.toggle('perf-minimized');
+            const btn = document.getElementById('perf-minimize');
+            if (btn) btn.textContent = isMin ? '▲ Max' : '▼ Min';
+            const dashBtn = document.getElementById('dash-toggle-btn');
+            if (dashBtn) dashBtn.textContent = isMin ? '📊 ▲' : '📊 ▼';
+        });
+
         document.getElementById('perf-clear')?.addEventListener('click', () => {
             this._csvRows = [];
             Object.values(this.charts)
@@ -573,33 +601,41 @@ export class ChartPanel {
         const css = `
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap');
 
+/* ── DOCKED PERFORMANCE PANEL ── */
+/* Panel permanen di bottom-left, bukan modal overlay */
 #perf-overlay {
     position: fixed;
-    inset: 0;
-    z-index: 200;
-    background: rgba(2,3,12,0.88);
-    backdrop-filter: blur(6px);
+    bottom: 0;
+    left: 36px;
+    z-index: 150;
     display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
+    pointer-events: none;
+    width: min(860px, calc(100vw - 320px));
 }
 
 #perf-overlay.perf-visible {
-    display: flex;
+    display: block;
+}
+
+/* Saat di-minimized, hanya header yang tampak */
+#perf-overlay.perf-minimized #perf-panel {
+    max-height: 44px;
+    overflow: hidden;
 }
 
 #perf-panel {
+    pointer-events: all;
     width: 100%;
-    max-width: 1100px;
-    max-height: 90vh;
-    background: rgba(6,10,28,0.98);
-    border: 1px solid rgba(0,200,255,0.2);
-    border-radius: 14px;
+    max-height: 46vh;
+    background: rgba(5, 8, 22, 0.97);
+    border: 1px solid rgba(0,200,255,0.22);
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
     overflow-y: auto;
-    box-shadow: 0 0 60px rgba(0,200,255,0.08), 0 0 120px rgba(123,47,255,0.06);
+    box-shadow: 0 -4px 40px rgba(0,200,255,0.10), 0 0 80px rgba(123,47,255,0.06);
     font-family: 'Exo 2', sans-serif;
     color: #c8d8e8;
+    transition: max-height 0.25s ease;
 }
 
 #perf-panel::-webkit-scrollbar {
@@ -678,6 +714,16 @@ export class ChartPanel {
 
 .perf-btn-json:hover {
     background: rgba(0,255,136,0.2);
+}
+
+.perf-btn-minimize {
+    background: rgba(255,224,51,0.08);
+    border-color: rgba(255,224,51,0.25);
+    color: #ffe033;
+}
+
+.perf-btn-minimize:hover {
+    background: rgba(255,224,51,0.18);
 }
 
 .perf-close {

@@ -1,8 +1,12 @@
 export class LOD {
     constructor() {
-        this.nearThreshold = 150;
-        this.midThreshold = 350;
-        this.farThreshold = 600;
+        // Threshold disesuaikan ke skala voxel world (blockHalf=2.4, cellSize=4.8)
+        // world ~120*4.8 = 576 unit. Kamera mulai di z=80.
+        // nearThreshold 80 → mulai reduce di jarak 80 unit dari kamera
+        // farThreshold 300 → cull total di jarak 300 unit
+        this.nearThreshold = 80;
+        this.midThreshold = 180;
+        this.farThreshold = 300;
         this.enabled = false;
         this.distanceScale = 1.0;
         this.transitionBand = 45;

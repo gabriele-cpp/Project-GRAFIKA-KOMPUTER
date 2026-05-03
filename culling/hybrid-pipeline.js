@@ -102,34 +102,33 @@ export class HybridCullingPipeline {
         this.stageStats.spatialMs = Number((performance.now() - spatialStart).toFixed(3));
 
         const predictiveStart = performance.now();
-        if (state.usePredictiveCulling || state.useTemporalCoherence || state.useOcclusion) {
-            candidates = candidates
-                .map(object => {
-                    const decision = decisions.get(object.id);
-                    decision.distance = distance(object.pos, camera.position);
-                    const history = this.visibilityHistory.get(object.id);
-                    const predictedVisible = state.usePredictiveCulling
-                        ? predictVisibility(object, camera, this.lastCamera, history)
-                        : false;
-                    const reusedVisibility = state.useTemporalCoherence && history?.visible && history.framesHidden < 2;
-                    decision.predictedVisible = predictedVisible;
-                    decision.reusedVisibility = reusedVisibility;
-                    return decision;
-                })
-                .sort((a, b) => {
-                    if (a.reusedVisibility !== b.reusedVisibility) return a.reusedVisibility ? -1 : 1;
-                    if (a.predictedVisible !== b.predictedVisible) return a.predictedVisible ? -1 : 1;
-                    return a.distance - b.distance;
-                });
-        } else {
-            candidates = candidates.map(object => {
-                const decision = decisions.get(object.id);
-                decision.distance = distance(object.pos, camera.position);
-                return decision;
-            });
-        }
+        // Selalu map distance + flags, lalu sort by distance ASC
+        // (wajib agar occluder terdekat diregister ke depth grid lebih dulu)
+        candidates = candidates.map(object => {
+            const decision = decisions.get(object.id);
+            decision.distance = distance(object.pos, camera.position);
+            const history = this.visibilityHistory.get(object.id);
+            decision.predictedVisible = state.usePredictiveCulling
+                ? predictVisibility(object, camera, this.lastCamera, history)
+                : false;
+            decision.reusedVisibility = state.useTemporalCoherence && history?.visible && history.framesHidden < 2;
+            return decision;
+        });
+        candidates.sort((a, b) => a.distance - b.distance);
         this.stageStats.predictiveMs = Number((performance.now() - predictiveStart).toFixed(3));
 
+        // ── PASS 1: isi depth grid dari semua occluder ──
+        // JANGAN filter dengan isFacingCamera di sini — dari view samping,
+        // dot product ≈ 0 untuk semua objek → grid tidak pernah terisi → occlusion = 0
+        if (state.useOcclusion) {
+            for (const decision of candidates) {
+                const obj = decision.object;
+                if (!obj.isOccluder && !(obj.bounds && obj.bounds.radius > 4)) continue;
+                this.occlusion.registerVisibleObject(obj.bounds, obj.isOccluder ? 1.5 : 1.0);
+            }
+        }
+
+        // ── PASS 2: evaluasi visibility setiap kandidat ──
         const visible = [];
         let occlusionCulled = 0;
         let lodCulled = 0;
@@ -167,10 +166,6 @@ export class HybridCullingPipeline {
             decision.visible = true;
             decision.reason = decision.predictedVisible ? 'predicted' : decision.reusedVisibility ? 'temporal' : 'visible';
             visible.push(decision);
-
-            if (state.useOcclusion && (object.isOccluder || object.bounds?.radius > 4)) {
-                this.occlusion.registerVisibleObject(object.bounds, object.isOccluder ? 1.35 : 1.0);
-            }
         }
         this.stageStats.occlusionMs = Number(occlusionTime.toFixed(3));
         this.stageStats.lodMs = Number(lodTime.toFixed(3));

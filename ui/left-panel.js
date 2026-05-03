@@ -195,7 +195,7 @@ const PANEL_HTML = `
 
       <div class="lp-label lp-campos" id="lp-campos">CAM: 0, 0, 0</div>
 
-      <button class="lp-btn" id="lp-btn-chartpanel">📊 Open Charts</button>
+      <button class="lp-btn" id="lp-btn-chartpanel">📊 Toggle Dashboard</button>
       <button class="lp-btn lp-btn-export" id="lp-btn-export">⬇ Export JSON</button>
     </div>
   </section>
